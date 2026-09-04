@@ -1,6 +1,6 @@
 ---
 file: README.md
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -43,6 +43,16 @@ python web/build_web.py
 
 The test suite fails if `index.html` is stale.
 
+### Deploying to GitHub Pages
+
+One-time: in the repository, Settings -> Pages -> Build and deployment -> Source: **GitHub Actions**.
+After that, every push to the default branch runs `.github/workflows/pages.yml`: it installs the
+requirements, rebuilds `web/index.html` from the engine, fails if the committed page was stale, runs
+the full test suite (including the headless-browser smoke test), and publishes the `web/` folder.
+The page is served at `https://zillaness.github.io/CutSheetCalculator/`. Pull requests run the
+test job only. The page loads Pyodide from cdn.jsdelivr.net and ezdxf/svgelements from pypi.org
+at runtime, so those hosts must be reachable from the viewer's browser.
+
 ## Quickstart
 
 ```bash
@@ -67,3 +77,4 @@ shapely greedy nester. The validation report always says which one ran. See
 - v1.0 (2026-09-04): Initial release.
 - v1.0.1 (2026-09-04): Reference link bump.
 - v1.1 (2026-09-04): Static web page section.
+- v1.2 (2026-09-04): GitHub Pages deployment section.

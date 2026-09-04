@@ -1,36 +1,60 @@
 # file: pages.yml
-# version: 1.0
+# version: 2.0
 # author: Sam Cao
 # created: 2026-09-04
 # last_updated: 2026-09-04
-# description: Publishes web/index.html (the static cut-sheet-builder page) to GitHub Pages on pushes to main. Enable Pages with source "GitHub Actions" in the repo settings first.
+# description: CI + GitHub Pages. Runs the test suite on every push and pull request, rebuilds web/index.html from the engine, and deploys the web/ folder to Pages from the repository's default branch. One-time setup: Settings -> Pages -> Source: GitHub Actions.
 # ai_update: Update last_updated and version. Append changelog at bottom.
-name: Publish static page
+name: Test and publish static page
 on:
   push:
-    branches: [main]
-    paths: [web/index.html]
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
   pages: write
   id-token: write
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - name: Rebuild the static page from the engine
+        run: python web/build_web.py
+      - name: Fail if the committed page was stale
+        run: |
+          if ! git diff --exit-code -- web/index.html; then
+            echo "web/index.html is stale. Run 'python web/build_web.py' and commit the result."
+            exit 1
+          fi
+      - run: python -m pytest -q tests
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: "0"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
   deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
         with:
-          path: web
+          enablement: true
       - id: deployment
         uses: actions/deploy-pages@v4
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v2.0 (2026-09-04): Test job on every push/PR with page rebuild + staleness check; deploy gated on the default branch instead of a hard-coded main.

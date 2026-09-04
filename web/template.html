@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   file: index.html (built from template.html by build_web.py; do not edit index.html by hand)
-  version: 1.1
+  version: 1.2
   author: Sam Cao
   created: 2026-09-04
   last_updated: __BUILD_DATE__
@@ -13,6 +13,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cut Sheet Builder</title>
+<meta name="description" content="To-scale nesting layouts, stock math, and cut-ready SVG/DXF from a parts list. Runs entirely in your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='4' width='28' height='24' rx='2' fill='%23f7f3e9' stroke='%23111' stroke-width='2'/%3E%3Crect x='5' y='7' width='10' height='8' fill='%234e79a7'/%3E%3Crect x='17' y='7' width='10' height='18' fill='%23f28e2b'/%3E%3Crect x='5' y='17' width='10' height='8' fill='%2359a14f'/%3E%3C/svg%3E">
 <style>
   :root { --ink:#1b1b1b; --muted:#666; --line:#d9d4c7; --bg:#faf8f3; --panel:#fff; --accent:#2b5c8a; --ok:#2e7d32; --bad:#c0392b; --warn:#b26a00; }
   * { box-sizing:border-box; }
@@ -61,6 +63,7 @@
 </style>
 </head>
 <body>
+<noscript><p style="padding:12px 22px;color:#c0392b">This page needs JavaScript: it runs the nesting engine in your browser.</p></noscript>
 <header>
   <h1>Cut Sheet Builder</h1>
   <span id="status">Loading engine (first load downloads about 15 MB)...</span>
@@ -427,6 +430,7 @@ loadEngine();
 <!-- CHANGELOG
   v1.0 (2026-09-04): Initial release.
   v1.1 (2026-09-04): Offcut / extra sheet size rows (multiple stock sizes).
+  v1.2 (2026-09-04): Favicon, description, noscript notice for GitHub Pages.
 -->
 </body>
 </html>

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 file: build_web.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -19,7 +19,7 @@ import os
 import sys
 import zipfile
 
-PYODIDE_VERSION = "0.27.5"
+PYODIDE_VERSION = "0.27.7"  # last 0.27.x release (checked against the npm registry 2026-09-04)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -75,3 +75,4 @@ if __name__ == "__main__":
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): Pyodide 0.27.7.
