@@ -14,7 +14,9 @@ Phase 0 usage-mechanics experiment: pending (no meter readings available overnig
 ## Ledger
 - 01:20 ✅ unit 1a: cutsheet.pipeline (shared build path), cutsheet.webapi (JSON in/out for the page), per-sheet reference renders, CLI refactored, 4 webapi tests (37 total)
 - 01:40 ✅ unit 1b+1c: web/template.html + build_web.py -> single-file web/index.html (Pyodide loads engine zip); Playwright smoke test (5) + staleness test
-- 01:41 ▶ NEXT: README web section + ledger; then queue item 2 (CLI --pdf via cairosvg)
+- 01:42 ✅ README web section
+- 02:05 ✅ unit 2: PDF cut sheet (one page per sheet, placement table under each sheet) via cairosvg + pypdf, CLI --no-pdf flag, tests (44 total)
+- 02:06 ▶ NEXT: queue item 3, engrave/cut layer detection on DXF/SVG import (layer names containing engrave/score -> ENGRAVE layer)
 
 ## Handoff
 (filled at soft-stop or limit)

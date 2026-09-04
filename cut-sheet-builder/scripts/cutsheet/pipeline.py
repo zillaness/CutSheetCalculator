@@ -1,6 +1,6 @@
 """
 file: pipeline.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -50,7 +50,35 @@ def echo_job(job: Job, out_dir: str) -> str:
     return path
 
 
-def build_job(job: Job, out_dir: str, dxf: bool = True, determinism: bool = True, per_sheet_svgs: bool = False) -> BuildResult:
+def write_pdf(sheet_svgs: dict[int, str], path: str) -> str | None:
+    """One PDF page per sheet from the per-sheet reference SVGs. Needs cairosvg; pypdf merges pages.
+    Returns the written path, or None when cairosvg is unavailable."""
+    try:
+        import cairosvg
+    except ImportError:
+        return None
+    pages = [cairosvg.svg2pdf(bytestring=svg.encode("utf-8")) for _, svg in sorted(sheet_svgs.items())]
+    if not pages:
+        return None
+    try:
+        from pypdf import PdfWriter, PdfReader
+        import io
+        w = PdfWriter()
+        for pg in pages:
+            for page in PdfReader(io.BytesIO(pg)).pages:
+                w.add_page(page)
+        with open(path, "wb") as fh:
+            w.write(fh)
+    except ImportError:  # no merger: first page only is wrong, so write one file per sheet instead
+        root, ext = os.path.splitext(path)
+        for i, pg in enumerate(pages, 1):
+            with open(f"{root}_p{i:02d}{ext}", "wb") as fh:
+                fh.write(pg)
+        return f"{root}_p01{ext}"
+    return path
+
+
+def build_job(job: Job, out_dir: str, dxf: bool = True, determinism: bool = True, per_sheet_svgs: bool = False, pdf: bool = False) -> BuildResult:
     os.makedirs(out_dir, exist_ok=True)
     base = slug(job.name)
     V = job.version
@@ -76,8 +104,13 @@ def build_job(job: Job, out_dir: str, dxf: bool = True, determinism: bool = True
                 dxf_name = f"{base}_{tag}_cut_v{V}.dxf"
                 if write_cut_dxf(layout, s, os.path.join(out_dir, dxf_name)):
                     outputs.append(dxf_name)
-            if per_sheet_svgs:
-                sheet_svgs[s.index] = render_reference_svg(layout, f"{base}_{tag}_reference_v{V}.svg", only_sheets=[s.index])
+            if per_sheet_svgs or pdf:
+                sheet_svgs[s.index] = render_reference_svg(layout, f"{base}_{tag}_reference_v{V}.svg", only_sheets=[s.index], with_table=True)
+        if pdf and sheet_svgs:
+            pdf_name = f"{base}_cut_sheet_v{V}.pdf"
+            written = write_pdf(sheet_svgs, os.path.join(out_dir, pdf_name))
+            if written:
+                outputs.append(os.path.basename(written))
 
     rep = verify(layout, ref_text, determinism=determinism)
 
@@ -97,3 +130,4 @@ def build_job(job: Job, out_dir: str, dxf: bool = True, determinism: bool = True
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release (extracted from cut_sheet_builder.py cmd_build).
+# v1.1 (2026-09-04): PDF cut sheet export (cairosvg + pypdf).

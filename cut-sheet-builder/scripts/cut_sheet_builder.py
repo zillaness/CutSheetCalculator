@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 file: cut_sheet_builder.py
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -12,7 +12,7 @@ Usage:
   python cut_sheet_builder.py deps
   python cut_sheet_builder.py presets
   python cut_sheet_builder.py echo  job.json [--out DIR]
-  python cut_sheet_builder.py build job.json [--out DIR] [--no-determinism] [--no-dxf]
+  python cut_sheet_builder.py build job.json [--out DIR] [--no-determinism] [--no-dxf] [--no-pdf]
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ def cmd_build(args) -> int:
 
     job = load_job(args.job)
     out_dir = args.out or os.path.join(os.path.dirname(os.path.abspath(args.job)), "out", _slug(job.name))
-    res = build_job(job, out_dir, dxf=not args.no_dxf, determinism=not args.no_determinism)
+    res = build_job(job, out_dir, dxf=not args.no_dxf, determinism=not args.no_determinism, pdf=not args.no_pdf)
     layout, rep = res.layout, res.report
 
     du = job.display_unit
@@ -112,6 +112,8 @@ def cmd_build(args) -> int:
     print("\nFiles:")
     for o in res.outputs:
         print(f"  {o}")
+    if not args.no_pdf and not any(o.endswith(".pdf") for o in res.outputs) and res.layout.placements:
+        print("  (no PDF: pip install cairosvg pypdf)")
     if not rep.all_passed:
         print("\nVALIDATION FAILED. Do not cut from this layout.")
         return 2
@@ -132,6 +134,7 @@ def main(argv=None) -> int:
     b.add_argument("--out")
     b.add_argument("--no-determinism", action="store_true", help="skip the re-run determinism check (halves runtime)")
     b.add_argument("--no-dxf", action="store_true")
+    b.add_argument("--no-pdf", action="store_true", help="skip the PDF cut sheet (needs cairosvg; pypdf for one multi-page file)")
     b.set_defaults(fn=cmd_build)
     args = ap.parse_args(argv)
     try:
@@ -148,3 +151,4 @@ if __name__ == "__main__":
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): build moved to cutsheet.pipeline (shared with the web page).
+# v1.2 (2026-09-04): --no-pdf flag; PDF cut sheet on by default when cairosvg is installed.

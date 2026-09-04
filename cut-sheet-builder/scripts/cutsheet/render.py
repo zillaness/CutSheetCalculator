@@ -1,6 +1,6 @@
 """
 file: render.py
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -73,10 +73,12 @@ def _ruler_step(job: Job) -> tuple[float, str]:
     return step, du
 
 
-def render_reference_svg(layout: Layout, filename: str, only_sheets=None) -> str:
-    """only_sheets: optional list of sheet indices to draw (one page per sheet for printing)."""
+def render_reference_svg(layout: Layout, filename: str, only_sheets=None, with_table: bool = False) -> str:
+    """only_sheets: optional list of sheet indices to draw (one page per sheet for printing).
+    with_table: append a placement table (x, y, size, rotation per part) under the legend, for hand layout."""
     job = layout.job
     sheets = [s for s in layout.sheets if only_sheets is None or s.index in set(only_sheets)]
+    table_rows = sum(len(s.placements) for s in sheets) + len(sheets) if with_table else 0
     k = pick_scale(job)
     du = job.display_unit
     W, H = job.sheet_width, job.sheet_height
@@ -88,9 +90,10 @@ def render_reference_svg(layout: Layout, filename: str, only_sheets=None) -> str
     sheet_px_w, sheet_px_h = W * k, H * k
     legend_row = 18.0
     legend_h = 40 + legend_row * (len(job.parts) + 1)
+    table_h = (30 + 15 * (table_rows + 1)) if with_table else 0
     total_w = PAD * 2 + RULER + sheet_px_w
     total_w = max(total_w, 720.0)
-    total_h = HEADER + len(sheets) * (TITLE + RULER + sheet_px_h + GAP) + legend_h + PAD
+    total_h = HEADER + len(sheets) * (TITLE + RULER + sheet_px_h + GAP) + legend_h + table_h + PAD
 
     out = []
     out.append('<?xml version="1.0" encoding="UTF-8"?>\n')
@@ -205,6 +208,23 @@ def render_reference_svg(layout: Layout, filename: str, only_sheets=None) -> str
             if name == "":
                 continue
             out.append(f'<text x="{_fmtnum(PAD + dx)}" y="{_fmtnum(ry)}" font-size="10" fill="#111">{_esc(v)}</text>\n')
+    if with_table:
+        ty = hy + (len(job.parts) + 1) * legend_row + 30
+        out.append(f'<text x="{PAD}" y="{_fmtnum(ty)}" font-size="13" font-weight="bold" fill="#111">Placements (x, y from the top-left corner to the part\'s bounding box)</text>\n')
+        tcols = [("#", 0), ("part", 30), ("copy", 90), ("x", 130), ("y", 260), ("placed w x h", 390), ("rotation", 520)]
+        ty += 16
+        for name, dx in tcols:
+            out.append(f'<text x="{_fmtnum(PAD + dx)}" y="{_fmtnum(ty)}" font-size="10" font-weight="bold" fill="#333">{_esc(name)}</text>\n')
+        for sheet in sheets:
+            ty += 15
+            out.append(f'<text x="{PAD}" y="{_fmtnum(ty)}" font-size="10" font-weight="bold" fill="#111">{_esc(sheet.label)}{" (DEFERRED)" if sheet.deferred else ""}</text>\n')
+            for i, pl in enumerate(sheet.placements, 1):
+                ty += 15
+                xs = U.fmt(pl.x, du) + (f" ({U.fmt_fraction(pl.x)})" if du == "in" else "")
+                ys = U.fmt(pl.y, du) + (f" ({U.fmt_fraction(pl.y)})" if du == "in" else "")
+                vals = [str(i), pl.part_id, str(pl.index), xs, ys, f"{_fmtnum(U.from_base(pl.w, du))} x {_fmtnum(U.from_base(pl.h, du))}", f"{_fmtnum(pl.angle)} deg" if pl.angle % 360 else "0"]
+                for (name, dx), v in zip(tcols, vals):
+                    out.append(f'<text x="{_fmtnum(PAD + dx)}" y="{_fmtnum(ty)}" font-size="10" fill="#111">{_esc(v)}</text>\n')
     out.append(_changelog_comment(job.version))
     out.append('</svg>\n')
     return "".join(out)
@@ -321,3 +341,4 @@ def render_parts_echo_svg(job: Job, filename: str) -> str:
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): only_sheets option for per-sheet pages.
+# v1.2 (2026-09-04): with_table placement table for printed pages.
