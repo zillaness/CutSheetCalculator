@@ -1,6 +1,6 @@
 """
 file: pack_poly.py
-version: 1.2
+version: 1.3
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -123,14 +123,16 @@ def _frange(lo: float, hi: float, step: float):
     return [lo + i * step for i in range(n + 1)]
 
 
-def _nest_shapely(job: Job, instances: list[Instance]) -> list[Placement]:
+def _nest_shapely(job: Job, instances: list[Instance], sheet_w: float, sheet_h: float, max_sheets=None) -> tuple[list[Placement], list[Instance]]:
     gap = job.gap
     half = gap / 2.0
     m = job.outer_edge_margin
-    usable = box(m, m, job.sheet_width - m, job.sheet_height - m)
+    usable = box(m, m, sheet_w - m, sheet_h - m)
     ub = usable.bounds
+    usable_w, usable_h = sheet_w - 2 * m, sheet_h - 2 * m
     sheets: list[_SheetState] = []
     placements: list[Placement] = []
+    unplaced: list[Instance] = []
 
     # Cache rotated base outlines per (part, angle).
     cache: dict[tuple[str, float], tuple[Polygon, Polygon]] = {}
@@ -143,7 +145,7 @@ def _nest_shapely(job: Job, instances: list[Instance]) -> list[Placement]:
             cache[key] = (base, _inflate(base, half))
         base, infl = cache[key]
         _, _, w, h = base.bounds
-        if w <= job.usable_width + EPS and h <= job.usable_height + EPS:
+        if w <= usable_w + EPS and h <= usable_h + EPS:
             return (a, base, infl, w, h, infl.bounds)
         return None
 
@@ -198,10 +200,13 @@ def _nest_shapely(job: Job, instances: list[Instance]) -> list[Placement]:
     for inst in instances:
         vars_ = variants(inst)
         if not vars_:
-            raise ValueError(f"part {inst.part.id} does not fit the usable sheet in any allowed orientation")
+            unplaced.append(inst)  # may fit a later, larger stock
+            continue
         placed_ok = False
         for si in range(len(sheets) + 1):
             if si == len(sheets):
+                if max_sheets is not None and len(sheets) >= max_sheets:
+                    break
                 sheets.append(_SheetState(usable))
             st = sheets[si]
             # Candidate anchor points: sheet corner plus corners derived from placed bboxes.
@@ -238,8 +243,8 @@ def _nest_shapely(job: Job, instances: list[Instance]) -> list[Placement]:
             placed_ok = True
             break
         if not placed_ok:
-            raise ValueError(f"could not place part {inst.part.id} on any sheet")
-    return placements
+            unplaced.append(inst)
+    return placements, unplaced
 
 
 def _nest_nest2d(job: Job, instances: list[Instance]) -> list[Placement]:
@@ -292,12 +297,17 @@ def _nest_nest2d(job: Job, instances: list[Instance]) -> list[Placement]:
     return placements
 
 
-def nest_outlines(job: Job, instances: list[Instance], engine: str = "auto") -> tuple[list[Placement], str, Optional[str]]:
+def nest_outlines(job: Job, instances: list[Instance], engine: str = "auto", sheet_w=None, sheet_h=None,
+                  max_sheets=None) -> tuple[list[Placement], str, Optional[str], list[Instance]]:
+    """True-outline nesting onto sheets of (sheet_w, sheet_h) (default: the job's first stock), at most max_sheets.
+    Returns (placements, engine_name, fallback_note, unplaced_instances)."""
+    sheet_w = job.sheet_width if sheet_w is None else sheet_w
+    sheet_h = job.sheet_height if sheet_h is None else sheet_h
     fallback = None
-    if engine in ("auto", "nest2d"):
+    if engine in ("auto", "nest2d") and max_sheets is None and sheet_w == job.sheet_width and sheet_h == job.sheet_height:
         try:
             pl = _nest_nest2d(job, instances)
-            return pl, "nest2d (libnest2d no-fit-polygon)", None
+            return pl, "nest2d (libnest2d no-fit-polygon)", None, []
         except ImportError:
             if engine == "nest2d":
                 raise
@@ -306,14 +316,15 @@ def nest_outlines(job: Job, instances: list[Instance], engine: str = "auto") -> 
             if engine == "nest2d":
                 raise
             fallback = f"nest2d failed ({ex}); used the bundled shapely greedy nester (lower packing density)"
-    pl = _nest_shapely(job, instances)
+    pl, unplaced = _nest_shapely(job, instances, sheet_w, sheet_h, max_sheets)
     label = "free (15 deg grid + 1 deg refine)" if job.rotation_step == FREE_ROTATION else f"{float(job.rotation_step):g} deg"
     if any(i.part.rotation_step is not None for i in instances):
         label += ", per-part overrides"
-    return pl, f"bundled shapely greedy (bottom-left, rotation {label})", fallback
+    return pl, f"bundled shapely greedy (bottom-left, rotation {label})", fallback, unplaced
 
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): Free-rotation refinement pass and per-part rotation steps.
 # v1.2 (2026-09-04): Slide the top 6 candidate anchors before choosing (denser packing).
+# v1.3 (2026-09-04): Sheet size and cap parameters; unplaced instances returned instead of raising.

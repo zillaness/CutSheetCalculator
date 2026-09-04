@@ -1,6 +1,6 @@
 """
 file: model.py
-version: 1.2
+version: 1.3
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -130,6 +130,19 @@ class Part:
 
 
 @dataclass
+class Stock:
+    """One sheet size available to the job. quantity None = unlimited (only the last stock may be unlimited)."""
+    width: float
+    height: float
+    quantity: Optional[int] = None
+    preset: Optional[str] = None
+
+    @property
+    def label(self) -> str:
+        return self.preset or f"{self.width:g}x{self.height:g}in"
+
+
+@dataclass
 class Rod:
     id: str
     length: float  # base units
@@ -149,6 +162,7 @@ class Job:
     nest_mode: str
     parts: list[Part]
     rods: list[Rod] = field(default_factory=list)
+    stocks: list[Stock] = field(default_factory=list)  # priority order; sheet_width/height mirror stocks[0]
     custom_margin: float = 0.0
     rotation_step: object = 90.0  # degrees, or "free"
     seed: int = 0
@@ -181,6 +195,13 @@ class Job:
     def usable_height(self) -> float:
         return self.sheet_height - 2 * self.outer_edge_margin
 
+    def usable(self, stock: "Stock") -> tuple[float, float]:
+        return (stock.width - 2 * self.outer_edge_margin, stock.height - 2 * self.outer_edge_margin)
+
+    @property
+    def multi_stock(self) -> bool:
+        return len(self.stocks) > 1
+
     def part_mode(self, part: Part) -> str:
         return part.nest_mode or self.nest_mode
 
@@ -199,6 +220,49 @@ def _req(d: dict, key: str, ctx: str):
     if key not in d:
         raise JobError(f"{ctx}: missing required field '{key}'")
     return d[key]
+
+
+def _parse_one_stock(sheet, input_unit: str, ctx: str) -> Stock:
+    qty = None
+    if isinstance(sheet, str):
+        preset = sheet
+        if preset not in SHEET_PRESETS:
+            raise JobError(f"{ctx}: preset '{preset}' unknown; presets: {sorted(SHEET_PRESETS)}")
+        w, h, u = SHEET_PRESETS[preset]
+        return Stock(U.to_base(w, u), U.to_base(h, u), None, preset)
+    if isinstance(sheet, dict):
+        if sheet.get("quantity") is not None:
+            qty = int(sheet["quantity"])
+            if qty < 1:
+                raise JobError(f"{ctx}: quantity must be >= 1 (omit it for unlimited)")
+        if "preset" in sheet:
+            preset = sheet["preset"]
+            if preset not in SHEET_PRESETS:
+                raise JobError(f"{ctx}: preset '{preset}' unknown; presets: {sorted(SHEET_PRESETS)}")
+            w, h, u = SHEET_PRESETS[preset]
+            return Stock(U.to_base(w, u), U.to_base(h, u), qty, preset)
+        su = U.normalize_unit(sheet.get("units", input_unit))
+        w = U.to_base(float(_req(sheet, "width", ctx)), su)
+        h = U.to_base(float(_req(sheet, "height", ctx)), su)
+        if w <= 0 or h <= 0:
+            raise JobError(f"{ctx}: sheet dimensions must be positive")
+        return Stock(w, h, qty, None)
+    raise JobError(f"{ctx}: must be a preset name or an object with width/height")
+
+
+def _parse_stocks(raw: dict, input_unit: str) -> list[Stock]:
+    if raw.get("sheets") is not None:
+        lst = raw["sheets"]
+        if not isinstance(lst, list) or not lst:
+            raise JobError("'sheets' must be a non-empty list of sheet sizes in the order to use them")
+        stocks = [_parse_one_stock(x, input_unit, f"sheets[{i}]") for i, x in enumerate(lst)]
+        for st in stocks[:-1]:
+            if st.quantity is None:
+                raise JobError("only the last entry in 'sheets' may be unlimited (omit quantity); earlier entries need a quantity")
+        return stocks
+    if raw.get("sheet") is None:
+        raise JobError("job: 'sheet' (or 'sheets') is required; use a preset name or explicit width/height. There is no default sheet size")
+    return [_parse_one_stock(raw["sheet"], input_unit, "sheet")]
 
 
 def _parse_rotation_step(value, ctx: str):
@@ -243,32 +307,9 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
     def L(v):  # length in input units -> base
         return U.to_base(float(v), input_unit)
 
-    # Sheet: preset or explicit, never defaulted.
-    sheet = raw.get("sheet")
-    if sheet is None:
-        raise JobError("job: 'sheet' is required (use a preset name or explicit width/height); there is no default sheet size")
-    preset = None
-    if isinstance(sheet, str):
-        preset = sheet
-        if preset not in SHEET_PRESETS:
-            raise JobError(f"sheet preset '{preset}' unknown; presets: {sorted(SHEET_PRESETS)}")
-        w, h, u = SHEET_PRESETS[preset]
-        sheet_w, sheet_h = U.to_base(w, u), U.to_base(h, u)
-    elif isinstance(sheet, dict):
-        if "preset" in sheet:
-            preset = sheet["preset"]
-            if preset not in SHEET_PRESETS:
-                raise JobError(f"sheet preset '{preset}' unknown; presets: {sorted(SHEET_PRESETS)}")
-            w, h, u = SHEET_PRESETS[preset]
-            sheet_w, sheet_h = U.to_base(w, u), U.to_base(h, u)
-        else:
-            su = U.normalize_unit(sheet.get("units", input_unit))
-            sheet_w = U.to_base(float(_req(sheet, "width", "sheet")), su)
-            sheet_h = U.to_base(float(_req(sheet, "height", "sheet")), su)
-    else:
-        raise JobError("sheet must be a preset name or an object with width/height")
-    if sheet_w <= 0 or sheet_h <= 0:
-        raise JobError("sheet dimensions must be positive")
+    # Sheet stock: "sheet" (one size) or "sheets" (priority-ordered list, e.g. offcuts first). Never defaulted.
+    stocks = _parse_stocks(raw, input_unit)
+    sheet_w, sheet_h, preset = stocks[0].width, stocks[0].height, stocks[0].preset
 
     if "cutting_method" not in raw:
         raise JobError("job: 'cutting_method' is required ('free' or 'guillotine'); it is always asked per job and has no default")
@@ -388,7 +429,7 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
     job = Job(
         name=str(name), sheet_width=sheet_w, sheet_height=sheet_h,
         outer_edge_margin=margin, kerf=kerf, part_spacing_mode=spacing_mode,
-        cutting_method=cutting_method, nest_mode=nest_mode, parts=parts, rods=rods,
+        cutting_method=cutting_method, nest_mode=nest_mode, parts=parts, rods=rods, stocks=stocks,
         custom_margin=custom_margin, rotation_step=rotation_step,
         seed=int(raw.get("seed", 0)), display_unit=display_unit, input_unit=input_unit,
         sheet_preset=preset, isolated_groups=isolated, deferred_groups=deferred,
@@ -398,20 +439,26 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
         engrave_layer=str(out.get("engrave_layer", "none")),
         raw=raw,
     )
-    if job.usable_width <= 0 or job.usable_height <= 0:
-        raise JobError("outer_edge_margin leaves no usable area on the sheet")
+    for st in stocks:
+        uw, uh = job.usable(st)
+        if uw <= 0 or uh <= 0:
+            raise JobError(f"outer_edge_margin leaves no usable area on sheet {st.label}")
     for p in parts:
         fits = False
-        for a in p.allowed_angles(job.rotation_step, job.part_mode(p)):
-            rp = rotated_normalized(p.base_polygon(), a)
-            _, _, w, h = rp.bounds
-            if w <= job.usable_width + 1e-9 and h <= job.usable_height + 1e-9:
-                fits = True
+        for st in stocks:
+            uw, uh = job.usable(st)
+            for a in p.allowed_angles(job.rotation_step, job.part_mode(p)):
+                rp = rotated_normalized(p.base_polygon(), a)
+                _, _, w, h = rp.bounds
+                if w <= uw + 1e-9 and h <= uh + 1e-9:
+                    fits = True
+                    break
+            if fits:
                 break
         if not fits:
             raise JobError(
-                f"part '{p.id}' ({p.width:.3f} x {p.height:.3f} in) does not fit inside the usable sheet "
-                f"({job.usable_width:.3f} x {job.usable_height:.3f} in) in any allowed orientation")
+                f"part '{p.id}' ({p.width:.3f} x {p.height:.3f} in) does not fit inside the usable area of any sheet "
+                f"({', '.join(f'{st.label}: {job.usable(st)[0]:.3f} x {job.usable(st)[1]:.3f} in' for st in stocks)}) in any allowed orientation")
     return job
 
 
@@ -446,3 +493,4 @@ def parts_table(job: Job) -> list[dict[str, Any]]:
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): rotation_step accepts "free" and a per-part override.
 # v1.2 (2026-09-04): engrave geometry from import travels with the part (transform_like).
+# v1.3 (2026-09-04): Stock list ('sheets') with quantities, priority order.

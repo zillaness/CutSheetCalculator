@@ -1,6 +1,6 @@
 """
 file: layout.py
-version: 1.2
+version: 1.3
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -59,6 +59,13 @@ class Sheet:
     deferred: bool = False
     placements: list[Placement] = field(default_factory=list)
     engine: str = ""
+    width: float = 0.0   # this sheet's stock size (inches)
+    height: float = 0.0
+    stock: str = ""      # stock label (preset name or WxH)
+
+    @property
+    def area(self) -> float:
+        return self.width * self.height
 
     @property
     def label(self) -> str:
@@ -129,6 +136,7 @@ def build_layout(job: Job) -> Layout:
     buckets.sort(key=lambda b: (b[0] in job.deferred_groups, b[0] or ""))
 
     sheet_offset = 0
+    stock_left = [st.quantity for st in job.stocks]  # None = unlimited; shared across groups
     for group, parts in buckets:
         # Mode is a job-level choice; a per-part override to bounding-box is honored inside the same run
         # by giving that part its bbox as the outline. Guillotine cutting always packs bounding boxes.
@@ -148,33 +156,49 @@ def build_layout(job: Job) -> Layout:
                     run_parts.append(q)
                 else:
                     run_parts.append(p)
-        instances = expand_instances(run_parts)
-        if use_outline:
-            engine = job.engine_2d if job.engine_2d in ("auto", "nest2d", "shapely") else "auto"
-            placements, used, fb = nest_outlines(job, instances, engine)
-            layout.engines_used["true-outline"] = used
-        else:
-            engine = job.engine_2d if job.engine_2d in ("auto", "rectpack", "bundled") else "auto"
-            placements, used, fb = pack_rectangles(job, instances, engine)
-            if "true-outline" in modes and all_rects and job.cutting_method != "guillotine":
-                used += " (all parts are rectangles, so true-outline mode used the rectangle packer)"
-            layout.engines_used["bounding-box"] = used
-            if job.cutting_method == "guillotine" and "true-outline" in modes:
-                layout.fallbacks.append("guillotine cutting packs bounding boxes; true outlines are still rendered inside them")
-        if fb and fb not in layout.fallbacks:
-            layout.fallbacks.append(fb)
-        attach_engrave(job, placements)
-        # Re-attach the original part outline for rendering when a bbox-override part was packed as a box.
-        n_sheets = max((pl.sheet for pl in placements), default=-1) + 1
-        sheets = [Sheet(index=sheet_offset + i, group=group, deferred=(group in job.deferred_groups), engine=used)
-                  for i in range(n_sheets)]
-        for pl in placements:
-            pl.sheet = sheet_offset + pl.sheet
-            sheets[pl.sheet - sheet_offset].placements.append(pl)
-        for s in sheets:
-            s.placements.sort(key=lambda p: (p.y, p.x, p.part_id, p.index))
-        layout.sheets.extend(sheets)
-        sheet_offset += n_sheets
+        remaining = expand_instances(run_parts)
+        used = ""
+        # Walk the stock list in order: fill the first stock's sheets (up to its quantity), then the next.
+        for si_stock, stock in enumerate(job.stocks):
+            if not remaining:
+                break
+            cap = stock_left[si_stock]
+            if cap is not None and cap <= 0:
+                continue
+            if use_outline:
+                engine = job.engine_2d if job.engine_2d in ("auto", "nest2d", "shapely") else "auto"
+                placements, used, fb, remaining = nest_outlines(job, remaining, engine, stock.width, stock.height, cap)
+                layout.engines_used["true-outline"] = used
+            else:
+                engine = job.engine_2d if job.engine_2d in ("auto", "rectpack", "bundled") else "auto"
+                placements, used, fb, remaining = pack_rectangles(job, remaining, engine, stock.width, stock.height, cap)
+                if "true-outline" in modes and all_rects and job.cutting_method != "guillotine":
+                    used += " (all parts are rectangles, so true-outline mode used the rectangle packer)"
+                layout.engines_used["bounding-box"] = used
+                if job.cutting_method == "guillotine" and "true-outline" in modes:
+                    note = "guillotine cutting packs bounding boxes; true outlines are still rendered inside them"
+                    if note not in layout.fallbacks:
+                        layout.fallbacks.append(note)
+            if fb and fb not in layout.fallbacks:
+                layout.fallbacks.append(fb)
+            attach_engrave(job, placements)
+            n_sheets = max((pl.sheet for pl in placements), default=-1) + 1
+            if cap is not None:
+                stock_left[si_stock] = cap - n_sheets
+            sheets = [Sheet(index=sheet_offset + i, group=group, deferred=(group in job.deferred_groups), engine=used,
+                            width=stock.width, height=stock.height, stock=stock.label)
+                      for i in range(n_sheets)]
+            for pl in placements:
+                pl.sheet = sheet_offset + pl.sheet
+                sheets[pl.sheet - sheet_offset].placements.append(pl)
+            for sh in sheets:
+                sh.placements.sort(key=lambda p: (p.y, p.x, p.part_id, p.index))
+            layout.sheets.extend(sheets)
+            sheet_offset += n_sheets
+        if remaining:
+            raise ValueError(
+                "ran out of sheet stock: " + ", ".join(sorted({i.part.id for i in remaining})) +
+                f" ({len(remaining)} piece(s)) could not be placed. Add quantity to a stock entry or add an unlimited last entry.")
 
     if job.rods:
         layout.rod_result = pack_rods(job.rods, job.kerf)
@@ -185,3 +209,4 @@ def build_layout(job: Job) -> Layout:
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): Placements carry placed engrave geometry.
 # v1.2 (2026-09-04): All-rectangle jobs use the rectangle packer even in true-outline mode.
+# v1.3 (2026-09-04): Stock list loop; sheets carry their own size and stock label.

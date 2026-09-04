@@ -1,6 +1,6 @@
 """
 file: pack_rect.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -131,22 +131,32 @@ class GuillotineBin:
         self.used.append(r)
 
 
-def _pack_bundled(items: list[Item], bin_w: float, bin_h: float, guillotine: bool) -> list[tuple[Item, int, Rect, float]]:
-    """Returns (item, bin_index, rect(inflated), angle). Opens a new bin only when nothing open fits."""
+def _pack_bundled(items: list[Item], bin_w: float, bin_h: float, guillotine: bool, max_bins=None) -> tuple[list, list]:
+    """Returns ([(item, bin_index, rect(inflated), angle)], unplaced_items). Opens a new bin only when nothing
+    open fits, and never more than max_bins (None = unlimited); items that cannot be placed are returned."""
     bins = []
     out = []
+    unplaced = []
     for it in items:
+        if not it.options:
+            unplaced.append(it)
+            continue
         best = None
         for bi, b in enumerate(bins):
             cand = b.best(it.options)
             if cand is not None and (best is None or cand[0] < best[1][0]):
                 best = (bi, cand)
         if best is None:
+            if max_bins is not None and len(bins) >= max_bins:
+                unplaced.append(it)
+                continue
             b = GuillotineBin(bin_w, bin_h) if guillotine else MaxRectsBin(bin_w, bin_h)
             bins.append(b)
             cand = b.best(it.options)
             if cand is None:
-                raise ValueError(f"part {it.inst.part.id} cannot fit an empty sheet")
+                bins.pop()
+                unplaced.append(it)
+                continue
             best = (len(bins) - 1, cand)
         bi, cand = best
         b = bins[bi]
@@ -157,13 +167,14 @@ def _pack_bundled(items: list[Item], bin_w: float, bin_h: float, guillotine: boo
             _, r, a = cand
             b.place(r)
         out.append((it, bi, r, a))
-    return out
+    return out, unplaced
 
 
-def _pack_rectpack(items: list[Item], bin_w: float, bin_h: float, guillotine: bool):
+def _pack_rectpack(items: list[Item], bin_w: float, bin_h: float, guillotine: bool, max_bins=None):
     """Optional rectpack engine. Only valid when every item has the same rotation policy."""
     import rectpack  # noqa
 
+    items = [it for it in items if it.options]
     rotation_all = all(len(it.options) == 2 for it in items)
     rotation_none = all(len(it.options) == 1 for it in items)
     if not (rotation_all or rotation_none):
@@ -174,10 +185,11 @@ def _pack_rectpack(items: list[Item], bin_w: float, bin_h: float, guillotine: bo
     for it in items:
         w, h, a = it.options[0]
         packer.add_rect(w, h, rid=it.inst.key)
-    packer.add_bin(bin_w, bin_h, count=max(1, len(items)))
+    packer.add_bin(bin_w, bin_h, count=max(1, len(items)) if max_bins is None else max_bins)
     packer.pack()
     by_key = {it.inst.key: it for it in items}
     out = []
+    placed_keys = set()
     for (b, x, y, w, h, rid) in packer.rect_list():
         it = by_key[rid]
         w0, h0, a0 = it.options[0]
@@ -186,16 +198,22 @@ def _pack_rectpack(items: list[Item], bin_w: float, bin_h: float, guillotine: bo
         else:
             a = it.options[1][2]
         out.append((it, b, Rect(x, y, w, h), a))
-    if len(out) != len(items):
+        placed_keys.add(rid)
+    if len(out) != len(items) and max_bins is None:
         raise RuntimeError("rectpack left items unpacked")
     out.sort(key=lambda t: items.index(t[0]))
-    return out
+    return out, [it for it in items if it.inst.key not in placed_keys]
 
 
-def pack_rectangles(job: Job, instances: list[Instance], engine: str = "auto") -> tuple[list[Placement], str, Optional[str]]:
-    """Bounding-box packing of instances. Returns (placements, engine_name, fallback_note)."""
+def pack_rectangles(job: Job, instances: list[Instance], engine: str = "auto", sheet_w=None, sheet_h=None,
+                    max_sheets=None) -> tuple[list[Placement], str, Optional[str], list[Instance]]:
+    """Bounding-box packing of instances onto sheets of (sheet_w, sheet_h) (default: the job's first stock),
+    opening at most max_sheets. Returns (placements, engine_name, fallback_note, unplaced_instances)."""
     gap = job.gap
     guillotine = job.cutting_method == "guillotine"
+    sheet_w = job.sheet_width if sheet_w is None else sheet_w
+    sheet_h = job.sheet_height if sheet_h is None else sheet_h
+    usable_w, usable_h = sheet_w - 2 * job.outer_edge_margin, sheet_h - 2 * job.outer_edge_margin
     items = []
     for inst in instances:
         opts = []
@@ -207,19 +225,18 @@ def pack_rectangles(job: Job, instances: list[Instance], engine: str = "auto") -
             if key in seen:
                 continue
             seen.add(key)
-            if w <= job.usable_width + EPS and h <= job.usable_height + EPS:
+            if w <= usable_w + EPS and h <= usable_h + EPS:
                 opts.append((w + gap, h + gap, a))
-        if not opts:
-            raise ValueError(f"part {inst.part.id} does not fit the usable sheet")
-        items.append(Item(inst, opts))
+        items.append(Item(inst, opts))  # no options -> reported as unplaced (may fit a later, larger stock)
 
-    bin_w, bin_h = job.usable_width + gap, job.usable_height + gap
+    bin_w, bin_h = usable_w + gap, usable_h + gap
     fallback = None
     used = None
     result = None
+    unplaced_items: list[Item] = []
     if engine in ("auto", "rectpack"):
         try:
-            result = _pack_rectpack(items, bin_w, bin_h, guillotine)
+            result, unplaced_items = _pack_rectpack(items, bin_w, bin_h, guillotine, max_sheets)
             used = "rectpack (" + ("GuillotineBafSas" if guillotine else "MaxRectsBssf") + ")"
         except ImportError:
             if engine == "rectpack":
@@ -230,7 +247,7 @@ def pack_rectangles(job: Job, instances: list[Instance], engine: str = "auto") -
                 raise
             fallback = f"rectpack could not handle this job ({ex}); used the bundled packer instead"
     if result is None:
-        result = _pack_bundled(items, bin_w, bin_h, guillotine)
+        result, unplaced_items = _pack_bundled(items, bin_w, bin_h, guillotine, max_sheets)
         used = "bundled " + ("guillotine (best-area-fit, larger-leftover split)" if guillotine else "MaxRects (best-short-side-fit)")
 
     placements = []
@@ -240,7 +257,7 @@ def pack_rectangles(job: Job, instances: list[Instance], engine: str = "auto") -
         w, h = r.w - gap, r.h - gap
         poly = placed_polygon(it.inst.part, x, y, a)
         placements.append(Placement(it.inst.part.id, it.inst.index, bi, x, y, a, w, h, poly))
-    return placements, used, fallback
+    return placements, used, fallback, [it.inst for it in unplaced_items]
 
 
 # ---------------------------------------------------------------------------
@@ -278,3 +295,4 @@ def is_guillotine_cuttable(rects: list[tuple[float, float, float, float]], tol: 
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): Sheet size and sheet cap parameters; unplaced instances returned instead of raising.
