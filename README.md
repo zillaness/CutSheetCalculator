@@ -61,7 +61,7 @@ and validation report, and exits non-zero if any check fails.
 Bounding-box packing uses `rectpack` when importable, otherwise a bundled MaxRects or
 guillotine packer. True-outline nesting uses `pynest2d` when importable, otherwise a bundled
 shapely greedy nester. The validation report always says which one ran. See
-`cut-sheet-builder/references/engine_notes_v1.1.md`.
+`cut-sheet-builder/references/engine_notes_v1.2.md`.
 
 ## CHANGELOG
 - v1.0 (2026-09-04): Initial release.

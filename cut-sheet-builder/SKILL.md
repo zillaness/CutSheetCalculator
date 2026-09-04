@@ -54,7 +54,7 @@ interview -> job JSON -> echo (confirm parts) -> build (nest + render + verify) 
 - Python: `shapely` (required), `ezdxf` (DXF in/out), `svgelements` (SVG in)
 - Optional engines: `rectpack` (bounding-box), `pynest2d` (true-outline). When either is
   missing the bundled engine runs and the validation report flags it. Check with
-  `python scripts/cut_sheet_builder.py deps`. See `references/engine_notes_v1.1.md` before
+  `python scripts/cut_sheet_builder.py deps`. See `references/engine_notes_v1.2.md` before
   promising packing density.
 
 ```bash
@@ -78,7 +78,7 @@ CSB="python3 $SKILL_DIR/scripts/cut_sheet_builder.py"
 | Engine package | `scripts/cutsheet/` |
 | Job file schema | `references/job_schema_v1.2.md` |
 | Intake question set | `references/intake_questions_v1.1.md` |
-| Engine and fallback notes | `references/engine_notes_v1.1.md` |
+| Engine and fallback notes | `references/engine_notes_v1.2.md` |
 | Trophy regression job | `assets/examples/trophy_job_v1.0.json` |
 | Irregular-outline job + SVG | `assets/examples/l_bracket_job_v1.0.json`, `l_bracket_v1.0.svg` |
 

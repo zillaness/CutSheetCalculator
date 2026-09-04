@@ -1,6 +1,6 @@
 """
 file: pack_poly.py
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -24,6 +24,7 @@ from .model import (FREE_REFINE_SPAN, FREE_REFINE_STEP, FREE_ROTATION, FREE_COAR
 
 EPS = 1e-9
 AREA_TOL = 1e-7  # in^2; intersections smaller than this count as touching, not overlapping
+SLIDE_TOP_N = 6  # how many best-scoring candidate anchors get the gravity slide before choosing (measured: 6 beats 1 and 3)
 
 
 def _inflate(poly: Polygon, half_gap: float) -> Polygon:
@@ -154,9 +155,10 @@ def _nest_shapely(job: Job, instances: list[Instance]) -> list[Placement]:
                 out.append(v)
         return out
 
-    def try_place(st, vars_, cands):
-        """Best (score, angle, base, infl, w, h, cx, cy) over variants x candidate anchors, or None."""
-        best = None
+    def try_place(st, vars_, cands, top_n: int = 1):
+        """Best (score, angle, base, infl, w, h, cx, cy) over variants x candidate anchors, or None.
+        With top_n > 1 the best few anchors are each slid first and the best post-slide result wins."""
+        found = []
         for (a, base, infl, w, h, ib) in vars_:
             for (cx, cy) in cands:
                 cx = max(cx, ub[0])
@@ -179,8 +181,18 @@ def _nest_shapely(job: Job, instances: list[Instance]) -> list[Placement]:
                     if not _valid(st, p, q):
                         continue
                 score = (cy + h, cx + w, a)
-                if best is None or score < best[0]:
-                    best = (score, a, base, infl, w, h, cx, cy)
+                found.append((score, a, base, infl, w, h, cx, cy))
+        if not found:
+            return None
+        found.sort(key=lambda t: t[0])
+        if top_n <= 1:
+            return found[0]
+        best = None
+        for (_, a, base, infl, w, h, cx, cy) in found[:top_n]:
+            sx, sy = _slide(st, base, infl, cx, cy, ub)
+            sc = (sy + h, sx + w, a)
+            if best is None or sc < best[0]:
+                best = (sc, a, base, infl, w, h, sx, sy)
         return best
 
     for inst in instances:
@@ -199,11 +211,11 @@ def _nest_shapely(job: Job, instances: list[Instance]) -> list[Placement]:
                 cands.add((bx0 - half, by1 + half))
                 cands.add((bx1 + half, ub[1]))
                 cands.add((ub[0], by1 + half))
-            best = try_place(st, vars_, cands)
+            best = try_place(st, vars_, cands, SLIDE_TOP_N)
             if best is None:
                 continue
             _, a, base, infl, w, h, cx, cy = best
-            cx, cy = _slide(st, base, infl, cx, cy, ub)
+            cx, cy = _slide(st, base, infl, cx, cy, ub)  # no-op when already slid; cheap
             if inst.part.free_rotation(job.rotation_step):
                 # Free mode: refine the angle around the best coarse hit, re-sliding each candidate,
                 # and keep whichever lands highest/leftmost after the slide.
@@ -304,3 +316,4 @@ def nest_outlines(job: Job, instances: list[Instance], engine: str = "auto") -> 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): Free-rotation refinement pass and per-part rotation steps.
+# v1.2 (2026-09-04): Slide the top 6 candidate anchors before choosing (denser packing).

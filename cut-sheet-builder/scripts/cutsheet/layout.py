@@ -1,6 +1,6 @@
 """
 file: layout.py
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -134,6 +134,11 @@ def build_layout(job: Job) -> Layout:
         # by giving that part its bbox as the outline. Guillotine cutting always packs bounding boxes.
         modes = {job.part_mode(p) for p in parts}
         use_outline = ("true-outline" in modes) and job.cutting_method != "guillotine"
+        all_rects = all(p.is_rectangle for p in parts)
+        if use_outline and all_rects:
+            # A rectangle's outline is its bounding box, and the MaxRects packer beats the greedy
+            # outline nester at boxes, so route all-rectangle jobs there; the result is identical geometry.
+            use_outline = False
         run_parts = parts
         if use_outline and "bounding-box" in modes:
             run_parts = []
@@ -151,6 +156,8 @@ def build_layout(job: Job) -> Layout:
         else:
             engine = job.engine_2d if job.engine_2d in ("auto", "rectpack", "bundled") else "auto"
             placements, used, fb = pack_rectangles(job, instances, engine)
+            if "true-outline" in modes and all_rects and job.cutting_method != "guillotine":
+                used += " (all parts are rectangles, so true-outline mode used the rectangle packer)"
             layout.engines_used["bounding-box"] = used
             if job.cutting_method == "guillotine" and "true-outline" in modes:
                 layout.fallbacks.append("guillotine cutting packs bounding boxes; true outlines are still rendered inside them")
@@ -177,3 +184,4 @@ def build_layout(job: Job) -> Layout:
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): Placements carry placed engrave geometry.
+# v1.2 (2026-09-04): All-rectangle jobs use the rectangle packer even in true-outline mode.

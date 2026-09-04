@@ -1,6 +1,6 @@
 ---
 file: engine_notes_v1.0.md
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -36,7 +36,8 @@ paths are wired; install rectpack if you want it and the report will say so.
 | Engine | When | Notes |
 |---|---|---|
 | `pynest2d` (libnest2d, no-fit-polygon) | importable | Wrapper is written but could not be exercised at build time (no wheel for this Python). The verification pass still runs on its output, so a wrong placement fails loudly rather than silently |
-| bundled shapely greedy | pynest2d missing or failing | Largest-first, bottom-left candidate anchors, rotation search at `rotation_step`, gravity slide toward the top-left, kerf applied as a mitre buffer of gap/2 on every polygon, STRtree overlap queries |
+| bundled shapely greedy | pynest2d missing or failing | Largest-first, bottom-left candidate anchors, rotation search at `rotation_step`, the six best anchors each get a gravity slide toward the top-left and the best result wins, kerf applied as a mitre buffer of gap/2 on every polygon, STRtree overlap queries |
+| rectangle packer (see above) | every part in the run is a typed rectangle | A box's outline is its bbox and MaxRects packs boxes better than the greedy nester (trophy: 19 vs 12 parts on sheet 1), so all-rectangle jobs are routed there even in true-outline mode |
 
 ### Rotation search
 
@@ -58,8 +59,10 @@ notch) but it is a greedy heuristic. Expect lower density than nest2D or Deepnes
 whenever the report flags it, and recommend Deepnest when the job is dense or the stock is
 expensive.
 
-Runtime reference (this machine): 75 rectangles at 15 deg step, about 9 s; 12 L-brackets at
-90 deg, under 1 s. `--no-determinism` halves any of these for iteration.
+Runtime reference (this machine): 30 gussets at 15 deg, about 4 s; 24 L-brackets at 90 deg,
+about 1.5 s. `--no-determinism` halves any of these for iteration. Measured effect of sliding
+the top 6 anchors instead of 1: L-bracket column height 14.75 -> 12.5 in, gusset 17.6 -> 16.8 in,
+runtime x1.4 to x1.8.
 
 ## Spacing model, mechanically
 
@@ -77,3 +80,4 @@ in the bundled engines. The verifier re-runs the job and compares every placemen
 ## CHANGELOG
 - v1.0 (2026-09-04): Initial release.
 - v1.1 (2026-09-04): Rotation search section: free mode, per-part steps, mitre buffer note.
+- v1.2 (2026-09-04): Top-6 slide, all-rectangle routing, new runtime numbers.

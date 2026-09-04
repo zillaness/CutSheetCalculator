@@ -17,7 +17,8 @@ Phase 0 usage-mechanics experiment: pending (no meter readings available overnig
 - 01:42 ✅ README web section
 - 02:05 ✅ unit 2: PDF cut sheet (one page per sheet, placement table under each sheet) via cairosvg + pypdf, CLI --no-pdf flag, tests (44 total)
 - 02:35 ✅ unit 3: engrave/score layer detection (DXF layer names, SVG group names), transported through rotation/placement, ENGRAVE layer in cut SVG/DXF, drawn on reference/echo, verify check, 3 tests (47 total)
-- 02:36 ▶ NEXT: queue item 4, nester density (slide top-N candidates, measure on gusset + L-bracket jobs); keep only if it wins
+- 02:55 ✅ unit 4: nester slides top-6 anchors (L-bracket column 14.75->12.5 in, gusset 17.6->16.8 in); all-rectangle jobs routed to MaxRects even in true-outline mode (trophy sheet 1: 12->19 parts); engine notes updated
+- 02:56 ▶ NEXT: queue item 5, renderer edge-case tests (mm display, 4x8 ft rulers, deferred filenames, custom sheet, shared-edge cut file); then handoff
 
 ## Handoff
 (filled at soft-stop or limit)
