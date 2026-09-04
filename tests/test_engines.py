@@ -1,6 +1,6 @@
 """
 file: test_engines.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -217,5 +217,79 @@ def test_bbox_mode_uses_bbox_of_imported_outline(tmp_path):
         assert len(p.polygon.exterior.coords) == 7  # true outline still rendered (6 vertices + closing)
 
 
+def _outline_job(step, parts_extra=None, **over):
+    raw = {
+        "job_name": "rot", "sheet": "laser_24x18", "outer_edge_margin": 0.25, "kerf": 0.125,
+        "cutting_method": "free", "nest_mode": "true-outline", "rotation_step": step,
+        "parts": parts_extra or [],
+    }
+    raw.update(over)
+    return job_from_dict(raw)
+
+
+def _gusset(tmp_path):
+    f = tmp_path / "gusset.svg"
+    f.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="5in" height="3in" viewBox="0 0 5 3">'
+                 '<path d="M0,0 L5,0 L5,3 Z"/></svg>')
+    return str(f)
+
+
+@pytest.mark.parametrize("step", [90, 45, 15, "free"])
+def test_rotation_steps_all_verify(tmp_path, step):
+    job = _outline_job(step, [{"id": "G", "quantity": 20, "source": {"type": "file", "path": _gusset(tmp_path)}}])
+    lay = build_layout(job)
+    rep = verify(lay, determinism=False)
+    assert rep.all_passed, [c for c in rep.checks if not c.passed]
+    angles = {p.angle for p in lay.placements}
+    if step != "free":
+        assert all(abs(a / step - round(a / step)) < 1e-9 for a in angles)
+
+
+def test_sharp_tip_kerf_buffer_never_overlaps(tmp_path):
+    # Regression: the mitre kerf buffer reaches past gap/2 at a sharp tip; the nester's bbox pre-check
+    # once assumed gap/2 and let triangle tips overlap.
+    job = _outline_job(90, [{"id": "G", "quantity": 36, "source": {"type": "file", "path": _gusset(tmp_path)}}])
+    lay = build_layout(job)
+    assert next(c for c in verify(lay, determinism=False).checks if c.name == "no overlaps").passed
+    assert min_gap(lay) >= 0.125 - 1e-6
+
+
+def test_free_rotation_uses_off_grid_angles(tmp_path):
+    job = _outline_job("free", [{"id": "G", "quantity": 20, "source": {"type": "file", "path": _gusset(tmp_path)}}])
+    assert job.rotation_step == "free"
+    lay = build_layout(job)
+    assert verify(lay, determinism=False).all_passed
+    assert any(p.angle % 15 != 0 for p in lay.placements), "free mode should refine off the 15 deg grid"
+    assert "free" in lay.engines_used["true-outline"]
+
+
+def test_per_part_rotation_step_override(tmp_path):
+    g = _gusset(tmp_path)
+    job = _outline_job(15, [
+        {"id": "fine", "quantity": 8, "source": {"type": "file", "path": g}},
+        {"id": "coarse", "quantity": 8, "rotation_step": 90, "source": {"type": "file", "path": g}},
+    ])
+    assert job.parts[1].effective_step(job.rotation_step) == 90
+    assert set(job.parts[1].allowed_angles(job.rotation_step, "true-outline")) == {0, 90, 180, 270}
+    assert len(job.parts[0].allowed_angles(job.rotation_step, "true-outline")) == 24
+    lay = build_layout(job)
+    assert verify(lay, determinism=False).all_passed
+    assert all(p.angle % 90 == 0 for p in lay.placements if p.part_id == "coarse")
+
+
+def test_rectangles_stay_axis_aligned_even_when_free():
+    job = base_job(nest_mode="true-outline", rotation_step="free")
+    lay = build_layout(job)
+    assert all(p.angle in (0, 90) for p in lay.placements)
+
+
+def test_bad_rotation_step_rejected():
+    with pytest.raises(JobError):
+        base_job(rotation_step=70)
+    with pytest.raises(JobError):
+        base_job(rotation_step="sideways")
+
+
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): Rotation step, free mode, per-part override, and sharp-tip overlap regression tests.

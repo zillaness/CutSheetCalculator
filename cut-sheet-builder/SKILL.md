@@ -12,7 +12,7 @@ description: >
   plywood", or any request to figure out where parts go on a sheet or how much material
   to buy, even if the word "nest" never appears.
 metadata:
-  version: "1.0"
+  version: "1.1"
   author: Samuel Cao
   created: "2026-09-04"
   last_updated: "2026-09-04"
@@ -54,7 +54,7 @@ interview -> job JSON -> echo (confirm parts) -> build (nest + render + verify) 
 - Python: `shapely` (required), `ezdxf` (DXF in/out), `svgelements` (SVG in)
 - Optional engines: `rectpack` (bounding-box), `pynest2d` (true-outline). When either is
   missing the bundled engine runs and the validation report flags it. Check with
-  `python scripts/cut_sheet_builder.py deps`. See `references/engine_notes_v1.0.md` before
+  `python scripts/cut_sheet_builder.py deps`. See `references/engine_notes_v1.1.md` before
   promising packing density.
 
 ```bash
@@ -76,9 +76,9 @@ CSB="python3 $SKILL_DIR/scripts/cut_sheet_builder.py"
 |---|---|
 | CLI (echo, build, deps, presets) | `scripts/cut_sheet_builder.py` |
 | Engine package | `scripts/cutsheet/` |
-| Job file schema | `references/job_schema_v1.0.md` |
-| Intake question set | `references/intake_questions_v1.0.md` |
-| Engine and fallback notes | `references/engine_notes_v1.0.md` |
+| Job file schema | `references/job_schema_v1.1.md` |
+| Intake question set | `references/intake_questions_v1.1.md` |
+| Engine and fallback notes | `references/engine_notes_v1.1.md` |
 | Trophy regression job | `assets/examples/trophy_job_v1.0.json` |
 | Irregular-outline job + SVG | `assets/examples/l_bracket_job_v1.0.json`, `l_bracket_v1.0.svg` |
 
@@ -88,7 +88,7 @@ CSB="python3 $SKILL_DIR/scripts/cut_sheet_builder.py"
 
 ### 1. Interview (always)
 
-Run `user-input-protocol` with the question set in `references/intake_questions_v1.0.md`.
+Run `user-input-protocol` with the question set in `references/intake_questions_v1.1.md`.
 Ask in that order. `cutting_method` and sheet size are never defaulted; everything else has
 a sensible default the file names, but confirm anything that changes material use (kerf,
 margin, spacing mode, rotation policy for engraved or grained parts).
@@ -98,7 +98,7 @@ conversation first and ask only the gaps.
 
 ### 2. Write the job JSON
 
-Write `<job>_job_v1.0.json` following `references/job_schema_v1.0.md`. Keep imported
+Write `<job>_job_v1.0.json` following `references/job_schema_v1.1.md`. Keep imported
 outline files next to it (relative `source.path`). Units: set `units.input` to whatever
 the user typed in; the engine stores inches internally and converts back for display.
 
@@ -165,7 +165,10 @@ bounding-box corner. The DXF flips to y-up internally so it overlays the SVG cor
   Typed rectangles only ever rotate 0/90 (tilted rectangles help nothing and cannot be
   table-sawn). Guillotine cutting always packs bounding boxes; outlines still render.
 - **Rotation.** `rotation: auto | locked` with `locked_angle`. `rotation_step` sets the
-  search granularity for outlines (90 default; 15 packs tighter, slower).
+  search granularity for outlines: 90 (default), 45, 30, 15, or `free` (15 deg grid plus a
+  1 deg refine). Choose it from the cutting tool: laser/CNC take `free`, hand tracing and
+  jigsaw work want 90 or 45, table saws are guillotine and force 0/90. Any single part can
+  override the job's step.
 - **Groups.** `group` on a part; `isolated_groups` get their own sheets; `deferred_groups`
   are isolated and numbered last, hatched and titled in the render, `_deferred` in filenames.
 - **Determinism.** Fixed ordering (area desc, id, copy). Same input, same layout, checked.
@@ -209,3 +212,4 @@ guillotine), group isolation and deferral order, determinism, and which engine r
 
 ## CHANGELOG
 - v1.0 (2026-09-04): Initial release per cut_sheet_builder_prd_v1.1. Both nest modes, DXF/SVG import, two-dial spacing, rod packing, per-sheet cut files, validation report, acceptance tests.
+- v1.1 (2026-09-04): rotation_step gains `free` mode and a per-part override; intake maps cutting tool to rotation step; fixed a sharp-tip kerf-buffer overlap in the bundled nester.

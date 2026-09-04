@@ -1,6 +1,6 @@
 ---
 file: intake_questions_v1.0.md
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -35,7 +35,16 @@ are never defaulted: sheet size and cutting method.
 
 8. **Nest mode.** `true-outline` for imported outlines (default), `bounding-box` for speed or
    when parts are all rectangles. Per-part override possible.
-9. **Rotation step** for outline nesting: 90 (fast), 45, 30, 15 (tight, slower).
+9. **Rotation step** for outline nesting. Pick from how the parts will be cut, then confirm:
+
+   | Cutting tool | Suggested `rotation_step` | Why |
+   |---|---|---|
+   | Laser, CNC router, plasma | `free` (or 15 if the job is large and slow) | The machine does not care about the angle; density is all that matters |
+   | Jigsaw, bandsaw, hand tracing from a printed layout | 90 or 45 | Angles a person can mark with a square or a 45 template; odd angles are slow to lay out and easy to get wrong |
+   | Table saw, panel saw | none (guillotine) | `cutting_method: guillotine` forces 0/90 bounding boxes |
+
+   A single part can override the job's step (`parts[].rotation_step`) when one hand-cut
+   piece shares a sheet with laser-cut ones. Typed rectangles always stay on 0/90.
 10. **Groups and sequencing.** Any parts to isolate onto their own sheets or cut later?
 11. **Rods/bars.** Piece length, quantity, stock bar length (or "just tell me the total").
 12. **Units for display.** in/ft or mm/cm. Internal math is always inches.
@@ -49,3 +58,4 @@ are never defaulted: sheet size and cutting method.
 
 ## CHANGELOG
 - v1.0 (2026-09-04): Initial release.
+- v1.1 (2026-09-04): Rotation step guidance by cutting tool; free mode; per-part override.

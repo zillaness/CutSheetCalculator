@@ -1,6 +1,6 @@
 ---
 file: engine_notes_v1.0.md
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -38,6 +38,21 @@ paths are wired; install rectpack if you want it and the report will say so.
 | `pynest2d` (libnest2d, no-fit-polygon) | importable | Wrapper is written but could not be exercised at build time (no wheel for this Python). The verification pass still runs on its output, so a wrong placement fails loudly rather than silently |
 | bundled shapely greedy | pynest2d missing or failing | Largest-first, bottom-left candidate anchors, rotation search at `rotation_step`, gravity slide toward the top-left, kerf applied as a mitre buffer of gap/2 on every polygon, STRtree overlap queries |
 
+### Rotation search
+
+`rotation_step` is per job with a per-part override. Steps: 90, 45, 30, 15, 10, 5, or
+`free`. Free mode runs the 15 deg grid, then re-tries the best hit at 1 deg increments
+within 7 deg either side (re-sliding each), and keeps whichever lands highest and leftmost.
+It is a fine-angle search around a greedy choice, not a global optimizer: on a 30-gusset
+test it matched 15 deg (28 parts on sheet 1 vs 23 at 90 deg) at about 1.6x the runtime.
+pynest2d, when present, receives one rotation list for the whole job: the finest step any
+part asked for, 5 deg for free.
+
+The kerf buffer uses mitre joins, so at a sharp tip the buffered outline reaches farther
+than gap/2 (about 0.23 in at a 31 deg tip with a 1/8 in kerf). That is conservative: sharp
+tips keep a little extra clearance. The nester's bbox pre-check uses the buffered outline's
+real bounds for that reason.
+
 The bundled nester interlocks parts (an L-bracket rotated 180 drops into its neighbor's
 notch) but it is a greedy heuristic. Expect lower density than nest2D or Deepnest. Say so
 whenever the report flags it, and recommend Deepnest when the job is dense or the stock is
@@ -61,3 +76,4 @@ in the bundled engines. The verifier re-runs the job and compares every placemen
 
 ## CHANGELOG
 - v1.0 (2026-09-04): Initial release.
+- v1.1 (2026-09-04): Rotation search section: free mode, per-part steps, mitre buffer note.

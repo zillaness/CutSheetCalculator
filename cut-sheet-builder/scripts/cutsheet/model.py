@@ -1,6 +1,6 @@
 """
 file: model.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -31,6 +31,10 @@ SPACING_MODES = ("kerf-gap", "shared-edge", "custom-margin")
 CUTTING_METHODS = ("free", "guillotine")
 NEST_MODES = ("bounding-box", "true-outline")
 ROTATION_POLICIES = ("auto", "locked")
+FREE_ROTATION = "free"
+FREE_COARSE_STEP = 15.0   # coarse grid searched before the fine pass in free mode
+FREE_REFINE_SPAN = 7.0    # degrees either side of the best coarse angle
+FREE_REFINE_STEP = 1.0
 
 DEFAULT_PALETTE = [
     "#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2",
@@ -68,6 +72,7 @@ class Part:
     group: Optional[str] = None
     color: Optional[str] = None
     nest_mode: Optional[str] = None  # per-part override
+    rotation_step: Optional[object] = None  # per-part override: degrees or "free"
     outline: Optional[Polygon] = None  # base outline in inches, normalized, None for typed rectangles
     source: str = "typed"
     notes: str = ""
@@ -89,8 +94,13 @@ class Part:
     def bbox_area(self) -> float:
         return self.width * self.height
 
-    def allowed_angles(self, rotation_step: float, mode: str) -> list[float]:
-        """Angles the packer may try for this part. Locked parts get exactly one."""
+    def effective_step(self, job_step) -> object:
+        """Per-part rotation_step wins over the job's. Returns a float (degrees) or "free"."""
+        return self.rotation_step if self.rotation_step is not None else job_step
+
+    def allowed_angles(self, rotation_step, mode: str) -> list[float]:
+        """Coarse angles the packer may try for this part. Locked parts get exactly one.
+        "free" returns the 15-degree grid; the outline nester refines around the best hit."""
         if self.rotation == "locked":
             return [float(self.locked_angle) % 360]
         if mode == "bounding-box" or self.is_rectangle:
@@ -98,9 +108,15 @@ class Part:
             # are useless on a table saw, so keep them axis-aligned in every mode.
             base = float(self.locked_angle) % 360
             return [base, (base + 90) % 360]
-        step = float(rotation_step) if rotation_step and rotation_step > 0 else 90.0
+        step = self.effective_step(rotation_step)
+        if step == FREE_ROTATION:
+            step = FREE_COARSE_STEP
+        step = float(step) if step and float(step) > 0 else 90.0
         n = int(round(360.0 / step))
         return [(i * step) % 360 for i in range(max(n, 1))]
+
+    def free_rotation(self, job_step) -> bool:
+        return self.rotation == "auto" and not self.is_rectangle and self.effective_step(job_step) == FREE_ROTATION
 
 
 @dataclass
@@ -124,7 +140,7 @@ class Job:
     parts: list[Part]
     rods: list[Rod] = field(default_factory=list)
     custom_margin: float = 0.0
-    rotation_step: float = 90.0
+    rotation_step: object = 90.0  # degrees, or "free"
     seed: int = 0
     display_unit: str = "in"
     input_unit: str = "in"
@@ -173,6 +189,19 @@ def _req(d: dict, key: str, ctx: str):
     if key not in d:
         raise JobError(f"{ctx}: missing required field '{key}'")
     return d[key]
+
+
+def _parse_rotation_step(value, ctx: str):
+    """Degrees (a positive divisor of 360) or the string "free"."""
+    if isinstance(value, str) and value.strip().lower() == FREE_ROTATION:
+        return FREE_ROTATION
+    try:
+        step = float(value)
+    except (TypeError, ValueError):
+        raise JobError(f"{ctx}: '{value}' must be a number of degrees or \"free\"")
+    if step <= 0 or abs(360 / step - round(360 / step)) > 1e-9:
+        raise JobError(f"{ctx}: must be a positive divisor of 360 (e.g. 90, 45, 30, 15, 10, 5) or \"free\"")
+    return step
 
 
 def _choice(value: str, allowed: tuple, ctx: str) -> str:
@@ -253,9 +282,7 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
             raise JobError("part_spacing.value must be >= 0")
 
     nest_mode = _choice(raw.get("nest_mode", "true-outline"), NEST_MODES, "nest_mode")
-    rotation_step = float(raw.get("rotation_step", 90))
-    if rotation_step <= 0 or 360 % rotation_step > 1e-9 and abs(360 / rotation_step - round(360 / rotation_step)) > 1e-9:
-        raise JobError("rotation_step must be a positive divisor of 360 (e.g. 90, 45, 30, 15, 10, 5)")
+    rotation_step = _parse_rotation_step(raw.get("rotation_step", 90), "rotation_step")
 
     parts_raw = raw.get("parts", []) or []
     rods_raw = raw.get("rods", []) or []
@@ -278,6 +305,9 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
         pmode = pr.get("nest_mode")
         if pmode is not None:
             pmode = _choice(pmode, NEST_MODES, f"{ctx}.nest_mode")
+        pstep = pr.get("rotation_step")
+        if pstep is not None:
+            pstep = _parse_rotation_step(pstep, f"{ctx}.rotation_step")
 
         outline = None
         source = "typed"
@@ -307,7 +337,7 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
         parts.append(Part(
             id=pid, quantity=qty, width=width, height=height, rotation=rotation,
             locked_angle=locked_angle, engrave=bool(pr.get("engrave", False)),
-            group=pr.get("group"), color=pr.get("color"), nest_mode=pmode,
+            group=pr.get("group"), color=pr.get("color"), nest_mode=pmode, rotation_step=pstep,
             outline=outline, source=source, notes=notes,
         ))
 
@@ -370,6 +400,10 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
     return job
 
 
+def _step_label(step) -> str:
+    return "free" if step == FREE_ROTATION else f"{float(step):g} deg steps"
+
+
 def parts_table(job: Job) -> list[dict[str, Any]]:
     """Rows for the confirmation echo, in display units."""
     du = job.display_unit
@@ -383,7 +417,8 @@ def parts_table(job: Job) -> list[dict[str, Any]]:
             "true_area": f"{U.from_base(U.from_base(p.true_area, du), du):.3f} {du}^2",
             "bbox_fill": f"{100 * p.true_area / p.bbox_area:.0f}%",
             "quantity": p.quantity,
-            "rotation": p.rotation if p.rotation == "auto" else f"locked @ {p.locked_angle:g} deg",
+            "rotation": (f"auto ({_step_label(p.effective_step(job.rotation_step))})" if p.rotation == "auto" and not p.is_rectangle
+                         else "auto (0/90)" if p.rotation == "auto" else f"locked @ {p.locked_angle:g} deg"),
             "engrave": "yes" if p.engrave else "no",
             "group": p.group or "",
             "nest_mode": job.part_mode(p),
@@ -394,3 +429,4 @@ def parts_table(job: Job) -> list[dict[str, Any]]:
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): rotation_step accepts "free" and a per-part override.

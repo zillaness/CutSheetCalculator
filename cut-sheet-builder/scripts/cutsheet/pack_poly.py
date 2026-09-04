@@ -1,6 +1,6 @@
 """
 file: pack_poly.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -19,7 +19,8 @@ from shapely import affinity
 from shapely.strtree import STRtree
 
 from .layout import Instance, Placement
-from .model import Job, rotated_normalized
+from .model import (FREE_REFINE_SPAN, FREE_REFINE_STEP, FREE_ROTATION, FREE_COARSE_STEP,
+                    Job, rotated_normalized)
 
 EPS = 1e-9
 AREA_TOL = 1e-7  # in^2; intersections smaller than this count as touching, not overlapping
@@ -116,6 +117,11 @@ def _slide(state: _SheetState, base: Polygon, base_infl: Polygon, x: float, y: f
     return x, y
 
 
+def _frange(lo: float, hi: float, step: float):
+    n = int(round((hi - lo) / step))
+    return [lo + i * step for i in range(n + 1)]
+
+
 def _nest_shapely(job: Job, instances: list[Instance]) -> list[Placement]:
     gap = job.gap
     half = gap / 2.0
@@ -128,18 +134,54 @@ def _nest_shapely(job: Job, instances: list[Instance]) -> list[Placement]:
     # Cache rotated base outlines per (part, angle).
     cache: dict[tuple[str, float], tuple[Polygon, Polygon]] = {}
 
-    def variants(inst: Instance):
+    def variant(inst: Instance, a: float):
+        a = round(a % 360, 6)
+        key = (inst.part.id, a)
+        if key not in cache:
+            base = rotated_normalized(inst.part.base_polygon(), a)
+            cache[key] = (base, _inflate(base, half))
+        base, infl = cache[key]
+        _, _, w, h = base.bounds
+        if w <= job.usable_width + EPS and h <= job.usable_height + EPS:
+            return (a, base, infl, w, h, infl.bounds)
+        return None
+
+    def variants(inst: Instance, angles=None):
         out = []
-        for a in inst.part.allowed_angles(job.rotation_step, "true-outline"):
-            key = (inst.part.id, a)
-            if key not in cache:
-                base = rotated_normalized(inst.part.base_polygon(), a)
-                cache[key] = (base, _inflate(base, half))
-            base, infl = cache[key]
-            _, _, w, h = base.bounds
-            if w <= job.usable_width + EPS and h <= job.usable_height + EPS:
-                out.append((a, base, infl, w, h))
+        for a in (angles if angles is not None else inst.part.allowed_angles(job.rotation_step, "true-outline")):
+            v = variant(inst, a)
+            if v is not None:
+                out.append(v)
         return out
+
+    def try_place(st, vars_, cands):
+        """Best (score, angle, base, infl, w, h, cx, cy) over variants x candidate anchors, or None."""
+        best = None
+        for (a, base, infl, w, h, ib) in vars_:
+            for (cx, cy) in cands:
+                cx = max(cx, ub[0])
+                cy = max(cy, ub[1])
+                if cx + w > ub[2] + EPS or cy + h > ub[3] + EPS:
+                    continue
+                # cheap bbox reject against placed inflated bboxes, using the buffered outline's real
+                # bounds (a mitre buffer reaches farther than gap/2 at a sharp tip)
+                ix0, iy0 = cx + ib[0], cy + ib[1]
+                ix1, iy1 = cx + ib[2], cy + ib[3]
+                hit = False
+                for (bx0, by0, bx1, by1) in st.bboxes:
+                    if ix0 < bx1 - 1e-7 and ix1 > bx0 + 1e-7 and iy0 < by1 - 1e-7 and iy1 > by0 + 1e-7:
+                        hit = True
+                        break
+                if hit:
+                    # bboxes overlap; a true-outline check may still pass (nesting into a notch)
+                    p = affinity.translate(base, cx, cy)
+                    q = affinity.translate(infl, cx, cy)
+                    if not _valid(st, p, q):
+                        continue
+                score = (cy + h, cx + w, a)
+                if best is None or score < best[0]:
+                    best = (score, a, base, infl, w, h, cx, cy)
+        return best
 
     for inst in instances:
         vars_ = variants(inst)
@@ -157,34 +199,27 @@ def _nest_shapely(job: Job, instances: list[Instance]) -> list[Placement]:
                 cands.add((bx0 - half, by1 + half))
                 cands.add((bx1 + half, ub[1]))
                 cands.add((ub[0], by1 + half))
-            best = None
-            for (a, base, infl, w, h) in vars_:
-                for (cx, cy) in cands:
-                    cx = max(cx, ub[0])
-                    cy = max(cy, ub[1])
-                    if cx + w > ub[2] + EPS or cy + h > ub[3] + EPS:
-                        continue
-                    # cheap bbox reject against placed inflated bboxes
-                    ix0, iy0 = cx - half, cy - half
-                    ix1, iy1 = cx + w + half, cy + h + half
-                    hit = False
-                    for (bx0, by0, bx1, by1) in st.bboxes:
-                        if ix0 < bx1 - 1e-7 and ix1 > bx0 + 1e-7 and iy0 < by1 - 1e-7 and iy1 > by0 + 1e-7:
-                            hit = True
-                            break
-                    if hit:
-                        # bboxes overlap; a true-outline check may still pass (nesting into a notch)
-                        p = affinity.translate(base, cx, cy)
-                        q = affinity.translate(infl, cx, cy)
-                        if not _valid(st, p, q):
-                            continue
-                    score = (cy + h, cx + w, a)
-                    if best is None or score < best[0]:
-                        best = (score, a, base, infl, w, h, cx, cy)
+            best = try_place(st, vars_, cands)
             if best is None:
                 continue
             _, a, base, infl, w, h, cx, cy = best
             cx, cy = _slide(st, base, infl, cx, cy, ub)
+            if inst.part.free_rotation(job.rotation_step):
+                # Free mode: refine the angle around the best coarse hit, re-sliding each candidate,
+                # and keep whichever lands highest/leftmost after the slide.
+                best_score = (cy + h, cx + w)
+                fine = [a + d for d in _frange(-FREE_REFINE_SPAN, FREE_REFINE_SPAN, FREE_REFINE_STEP) if abs(d) > 1e-9]
+                anchors = {(cx, cy)} | set(cands)
+                for cand in variants(inst, fine):
+                    hit = try_place(st, [cand], anchors)
+                    if hit is None:
+                        continue
+                    _, a2, base2, infl2, w2, h2, cx2, cy2 = hit
+                    cx2, cy2 = _slide(st, base2, infl2, cx2, cy2, ub)
+                    sc = (cy2 + h2, cx2 + w2)
+                    if sc < best_score:
+                        best_score = sc
+                        a, base, infl, w, h, cx, cy = a2, base2, infl2, w2, h2, cx2, cy2
             poly = affinity.translate(base, cx, cy)
             st.add(affinity.translate(infl, cx, cy))
             placements.append(Placement(inst.part.id, inst.index, si, cx, cy, a, w, h, poly))
@@ -217,7 +252,10 @@ def _nest_nest2d(job: Job, instances: list[Instance]) -> list[Placement]:
     if all(i.part.rotation == "locked" for i in instances):
         cfg.rotations = [0.0]
     else:
-        step = math.radians(job.rotation_step)
+        # libnest2d takes one rotation list for the whole job: the finest step any part asked for.
+        steps = [i.part.effective_step(job.rotation_step) for i in instances if i.part.rotation == "auto"]
+        deg = 5.0 if any(st == FREE_ROTATION for st in steps) else min(float(st) for st in steps)
+        step = math.radians(deg)
         cfg.rotations = [k * step for k in range(int(round(2 * math.pi / step)))]
     n2d.nest(items, bin_, int(round(gap * S)), cfg)
     placements = []
@@ -257,8 +295,12 @@ def nest_outlines(job: Job, instances: list[Instance], engine: str = "auto") -> 
                 raise
             fallback = f"nest2d failed ({ex}); used the bundled shapely greedy nester (lower packing density)"
     pl = _nest_shapely(job, instances)
-    return pl, f"bundled shapely greedy (bottom-left, rotation step {job.rotation_step:g} deg)", fallback
+    label = "free (15 deg grid + 1 deg refine)" if job.rotation_step == FREE_ROTATION else f"{float(job.rotation_step):g} deg"
+    if any(i.part.rotation_step is not None for i in instances):
+        label += ", per-part overrides"
+    return pl, f"bundled shapely greedy (bottom-left, rotation {label})", fallback
 
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): Free-rotation refinement pass and per-part rotation steps.

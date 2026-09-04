@@ -1,6 +1,6 @@
 ---
 file: job_schema_v1.0.md
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -25,7 +25,7 @@ starting with `_` (metadata, changelog) are ignored by the engine.
 | `part_spacing` | no | `{ "mode": "kerf-gap" }` (default), `{ "mode": "shared-edge" }`, `{ "mode": "custom-margin", "value": 0.5 }` | Gap between adjacent parts; independent of `outer_edge_margin` |
 | `cutting_method` | **yes, no default** | `free` or `guillotine` | Guillotine packs bounding boxes so every sheet separates with full cuts |
 | `nest_mode` | no | `true-outline` (default) or `bounding-box` | Per-part override via `parts[].nest_mode` |
-| `rotation_step` | no | divisor of 360, default 90 | Angle increment for outline nesting. 15 is tighter and slower |
+| `rotation_step` | no | divisor of 360 (90, 45, 30, 15, 10, 5) or `"free"`, default 90 | Angle increment for outline nesting. `"free"` searches a 15 deg grid then refines to 1 deg around the best hit. Per-part override via `parts[].rotation_step`. Typed rectangles ignore it (always 0/90) |
 | `seed` | no | int | Reserved; engines are ordered deterministically anyway |
 | `engine` | no | `auto` (default), `rectpack`, `bundled`, `nest2d`, `shapely` | Force an engine; a forced engine that is missing is an error |
 | `parts` | yes (or rods) | array | See below |
@@ -49,6 +49,7 @@ starting with `_` (metadata, changelog) are ignored by the engine.
 | `group` | no | string | For isolation/deferral |
 | `color` | no | CSS color | Reference render only; palette assigned otherwise |
 | `nest_mode` | no | `true-outline` / `bounding-box` | Per-part override |
+| `rotation_step` | no | degrees or `"free"` | Per-part override of the job's step. Use it to keep one hand-cut part on 90s while the rest nest freely |
 
 Typed rectangles rotate only 0/90 in every mode.
 
@@ -85,3 +86,4 @@ Rod math: `n * length + (n - 1) * kerf`. Bars packed first-fit-decreasing.
 
 ## CHANGELOG
 - v1.0 (2026-09-04): Initial release.
+- v1.1 (2026-09-04): rotation_step accepts "free"; per-part rotation_step override.
