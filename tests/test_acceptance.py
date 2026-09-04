@@ -1,6 +1,6 @@
 """
 file: test_acceptance.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -60,6 +60,7 @@ def test_trophy_regression(tmp_path):
               "trophy_cut_list_v1.0.md", "trophy_validation_v1.0.md", "trophy_layout_v1.0.json"]:
         assert (tmp_path / f).exists(), f
     assert any(f.name.endswith("_deferred_cut_v1.0.svg") for f in tmp_path.iterdir())
+    assert (tmp_path / "trophy_sheet01_reference_v1.0.svg").exists() and (tmp_path / "trophy_sheet03_deferred_reference_v1.0.svg").exists()
 
 
 def test_irregular_outline(tmp_path):
@@ -87,3 +88,4 @@ def test_irregular_outline(tmp_path):
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): Per-sheet reference files asserted.

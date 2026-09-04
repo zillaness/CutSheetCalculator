@@ -1,6 +1,6 @@
 """
 file: pipeline.py
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -104,8 +104,10 @@ def build_job(job: Job, out_dir: str, dxf: bool = True, determinism: bool = True
                 dxf_name = f"{base}_{tag}_cut_v{V}.dxf"
                 if write_cut_dxf(layout, s, os.path.join(out_dir, dxf_name)):
                     outputs.append(dxf_name)
-            if per_sheet_svgs or pdf:
-                sheet_svgs[s.index] = render_reference_svg(layout, f"{base}_{tag}_reference_v{V}.svg", only_sheets=[s.index], with_table=True)
+            # Per-sheet reference pages (PRD v1.x "split files"): always written so one sheet can be handed off alone.
+            sheet_ref_name = f"{base}_{tag}_reference_v{V}.svg"
+            sheet_svgs[s.index] = render_reference_svg(layout, sheet_ref_name, only_sheets=[s.index], with_table=True)
+            write(sheet_ref_name, sheet_svgs[s.index])
         if pdf and sheet_svgs:
             pdf_name = f"{base}_cut_sheet_v{V}.pdf"
             written = write_pdf(sheet_svgs, os.path.join(out_dir, pdf_name))
@@ -131,3 +133,4 @@ def build_job(job: Job, out_dir: str, dxf: bool = True, determinism: bool = True
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release (extracted from cut_sheet_builder.py cmd_build).
 # v1.1 (2026-09-04): PDF cut sheet export (cairosvg + pypdf).
+# v1.2 (2026-09-04): Per-sheet reference SVG files always written.

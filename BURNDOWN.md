@@ -21,9 +21,10 @@ Phase 0 usage-mechanics experiment: pending (no meter readings available overnig
 - 03:05 ✅ unit 5: renderer edge-case tests (mm cut file, ft rulers + 12.5 px/in on 4x8, custom sheet + slugged/deferred filenames, shared-edge touching, echo, locked 90) (53 total); GitHub Pages workflow (main only, needs Pages enabled)
 - 03:35 ✅ unit 6a: multiple stock sizes, engine side. job "sheets" list in priority order with quantities (last may be unlimited); engines take sheet size + cap and return unplaced; stock loop in build_layout; Sheet carries width/height/stock; 6 tests (59 total)
 - 04:05 ✅ unit 6b: per-sheet sizes everywhere (reference/cut SVG/DXF, verify boundary+area per sheet, stock-quantity check, cut list by size, layout json stocks), web page offcut rows -> job.sheets, docs (schema v1.3, intake v1.2, SKILL v1.3); 2 tests (61 total)
-- 04:06 ▶ NEXT: handoff refresh; if quota remains: per-sheet reference SVG files written to out/ (cheap, PRD v1.x), then Deepnest-import idea is NOT in scope (needs a PRD)
+- 04:15 ✅ unit 7: per-sheet reference SVG files always written (PRD v1.x split files); SKILL outputs table updated
+- 04:16 ▶ NEXT (wake-up 05:16): re-run suite, confirm push, then STOP unless Sam queues more. Candidate only if asked: Deepnest import (needs PRD), pynest2d verification (needs a machine where it installs).
 
-## Handoff (interim, 03:06)
-Done tonight: static web page (Pyodide, single file, Playwright-tested against real engine output), shared pipeline + JSON web API, PDF cut sheet with placement tables, engrave/score layer import through to ENGRAVE layers, denser nesting (top-6 slide, rectangles to MaxRects), 16 new tests (53 total). All pushed to claude/cut-sheet-builder-prd-7sgek3.
+## Handoff (04:16)
+Done tonight: static web page (Pyodide, single file, Playwright-tested against real engine output), shared pipeline + JSON web API, PDF cut sheet with placement tables, engrave/score layer import through to ENGRAVE layers, denser nesting (top-6 slide, rectangles to MaxRects), multiple stock sizes end to end (offcuts first), per-sheet reference files, 25 new tests (61 total). All pushed to claude/cut-sheet-builder-prd-7sgek3.
 Not verified: the page's live Pyodide load (CDN blocked in this sandbox). First thing for Sam: open web/index.html in a browser with internet and watch the status line reach "Engine ready". If micropip cannot install ezdxf, DXF import in the page fails while SVG still works; the CLI is unaffected.
 Open for Sam: real trophy A-E dimensions; enable GitHub Pages (source: GitHub Actions) if hosting is wanted; pynest2d still untested.

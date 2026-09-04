@@ -140,6 +140,8 @@ echo notes warned about. Write the summary in Sam's voice; no filler, no em dash
 | File | What it is |
 |---|---|
 | `<job>_reference_v1.0.svg` | To-scale, labeled, colored layout of every sheet with rulers, legend, rotation tags `(R90)`, deferred sheets hatched and titled DEFERRED |
+| `<job>_sheetNN_reference_v1.0.svg` | One sheet alone, with a placement table (x, y, size, rotation) under it; what a student gets for their sheet |
+| `<job>_cut_sheet_v1.0.pdf` | The per-sheet pages as one PDF (needs cairosvg + pypdf) |
 | `<job>_sheetNN_cut_v1.0.svg` | Cut-ready: real units (`width="24in"`), hairline strokes, CUT and ENGRAVE layers, no labels or fills. `_deferred` in the name for deferred sheets |
 | `<job>_sheetNN_cut_v1.0.dxf` | Same geometry as DXF (R2010, `$INSUNITS` set, y-up), layers CUT / ENGRAVE |
 | `<job>_cut_list_v1.0.md` | Settings, stock summary, parts table, per-sheet placement table (x, y in decimals and nearest 1/16"), rod bars and offcuts |
