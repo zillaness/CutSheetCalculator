@@ -34,6 +34,7 @@ def test_index_html_is_current():
 
 
 def _chromium():
+    """Explicit binary when the sandbox ships one; otherwise None lets Playwright use its own install."""
     for pat in ("/opt/pw-browsers/chromium-*/chrome-linux/chrome", "/opt/pw-browsers/chromium_headless_shell-*/chrome-linux/headless_shell"):
         hits = sorted(glob.glob(pat))
         if hits:
@@ -54,10 +55,11 @@ def canned():
 def page(canned):
     pw = pytest.importorskip("playwright.sync_api")
     exe = _chromium()
-    if not exe:
-        pytest.skip("no bundled chromium")
     with pw.sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe)
+        try:
+            browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
+        except Exception as ex:  # no browser installed anywhere: skip rather than fail
+            pytest.skip(f"no chromium available for the smoke test: {ex}")
         pg = browser.new_page()
         # No network in CI: serve an empty stub for the Pyodide script and inject a fake engine that
         # records the request the page built and answers with real engine output.
@@ -147,4 +149,5 @@ def test_offcut_rows_become_sheets_list(page):
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): Fall back to Playwright's own Chromium (CI).
 # v1.1 (2026-09-04): Offcut rows test.

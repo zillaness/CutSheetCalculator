@@ -1,5 +1,5 @@
 # file: pages.yml
-# version: 2.0
+# version: 2.1
 # author: Sam Cao
 # created: 2026-09-04
 # last_updated: 2026-09-04
@@ -26,6 +26,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq libcairo2
       - run: pip install -r requirements.txt
       - run: python -m playwright install --with-deps chromium
       - name: Rebuild the static page from the engine
@@ -37,8 +38,6 @@ jobs:
             exit 1
           fi
       - run: python -m pytest -q tests
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: "0"
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web
@@ -58,3 +57,4 @@ jobs:
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v2.0 (2026-09-04): Test job on every push/PR with page rebuild + staleness check; deploy gated on the default branch instead of a hard-coded main.
+# v2.1 (2026-09-04): libcairo2 for the PDF export; default Playwright browser path.
