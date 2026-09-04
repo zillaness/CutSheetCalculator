@@ -1,6 +1,6 @@
 """
 file: units.py
-version: 1.0
+version: 1.0.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -54,9 +54,11 @@ def from_base(value: float, unit: str | None) -> float:
     return float(value) / TO_BASE[normalize_unit(unit)]
 
 
-def fmt(value_in_base: float, unit: str = "in", places: int = 3) -> str:
-    """Format an internal value for display in <unit>, trimming trailing zeros."""
+def fmt(value_in_base: float, unit: str = "in", places: int | None = None) -> str:
+    """Format an internal value for display in <unit>, trimming trailing zeros. Feet get four decimals so a 1/8 in kerf stays visible."""
     v = from_base(value_in_base, unit)
+    if places is None:
+        places = 4 if normalize_unit(unit) == "ft" else 3
     s = f"{v:.{places}f}".rstrip("0").rstrip(".")
     if s in ("", "-0"):
         s = "0"
@@ -77,3 +79,4 @@ def fmt_fraction(value_in_base: float, denominator: int = 16) -> str:
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.0.1 (2026-09-04): Four-decimal display for feet.
