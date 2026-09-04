@@ -1,5 +1,5 @@
 # file: pages.yml
-# version: 2.1
+# version: 2.2
 # author: Sam Cao
 # created: 2026-09-04
 # last_updated: 2026-09-04
@@ -8,6 +8,7 @@
 name: Test and publish static page
 on:
   push:
+    paths-ignore: [BURNDOWN.md]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -58,3 +59,4 @@ jobs:
 # v1.0 (2026-09-04): Initial release.
 # v2.0 (2026-09-04): Test job on every push/PR with page rebuild + staleness check; deploy gated on the default branch instead of a hard-coded main.
 # v2.1 (2026-09-04): libcairo2 for the PDF export; default Playwright browser path.
+# v2.2 (2026-09-04): Ledger-only pushes do not trigger a run.
