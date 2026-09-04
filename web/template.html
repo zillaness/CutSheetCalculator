@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<!--
+  file: index.html (built from template.html by build_web.py; do not edit index.html by hand)
+  version: 1.0
+  author: Sam Cao
+  created: 2026-09-04
+  last_updated: __BUILD_DATE__
+  description: Static cut-sheet-builder page. Runs the cutsheet Python engine in the browser with Pyodide; upload SVG/DXF or type rectangles, set options, build, download cut-ready files, print the cut sheet to PDF.
+  ai_update: Edit template.html, bump version, run build_web.py, append changelog comment at bottom.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cut Sheet Builder</title>
+<style>
+  :root { --ink:#1b1b1b; --muted:#666; --line:#d9d4c7; --bg:#faf8f3; --panel:#fff; --accent:#2b5c8a; --ok:#2e7d32; --bad:#c0392b; --warn:#b26a00; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 Helvetica, Arial, sans-serif; color:var(--ink); background:var(--bg); }
+  header { padding:14px 22px; border-bottom:1px solid var(--line); background:var(--panel); display:flex; gap:18px; align-items:baseline; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:19px; }
+  #status { color:var(--muted); font-size:13px; }
+  #status.err { color:var(--bad); }
+  main { max-width:1180px; margin:0 auto; padding:16px 22px 60px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:14px 16px; margin:0 0 14px; }
+  section h2 { margin:0 0 10px; font-size:15px; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); vertical-align:middle; font-size:13px; }
+  th { color:var(--muted); font-weight:600; }
+  input[type=text], input[type=number], select { padding:4px 6px; border:1px solid #bbb; border-radius:4px; font:inherit; background:#fff; }
+  input[type=number] { width:78px; }
+  input.short { width:60px; }
+  input.id { width:80px; }
+  button { padding:6px 12px; border:1px solid #999; border-radius:4px; background:#f3f1ea; font:inherit; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin-bottom:8px; }
+  .field { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--muted); }
+  .field > * { color:var(--ink); }
+  .hint { font-size:12px; color:var(--muted); }
+  .actions { display:flex; gap:10px; align-items:center; }
+  .banner { padding:10px 12px; border-radius:4px; font-weight:600; margin-bottom:10px; }
+  .banner.ok { background:#e6f4e7; color:var(--ok); }
+  .banner.bad { background:#fbe9e7; color:var(--bad); }
+  .pass { color:var(--ok); font-weight:600; } .fail { color:var(--bad); font-weight:600; } .flag { color:var(--warn); font-weight:600; }
+  .sheetview { border:1px solid var(--line); background:#fff; margin:8px 0; overflow:auto; }
+  .sheetview svg { width:100%; height:auto; display:block; }
+  .downloads a { display:inline-block; margin:3px 10px 3px 0; color:var(--accent); }
+  #echoview svg { max-width:100%; height:auto; }
+  .req { color:var(--bad); }
+  #print-pages { display:none; }
+  @media print {
+    body { background:#fff; }
+    header, main { display:none; }
+    #print-pages { display:block; }
+    .page { page-break-after:always; }
+    .page svg { width:100%; height:auto; }
+    .page table { font-size:10px; }
+    @page { size:landscape; margin:0.4in; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cut Sheet Builder</h1>
+  <span id="status">Loading engine (first load downloads about 15 MB)...</span>
+</header>
+<main>
+
+<section id="parts-section">
+  <h2>Parts</h2>
+  <table id="parts">
+    <thead><tr><th>ID</th><th>Source</th><th>File units</th><th>Qty</th><th>Rotation</th><th>Step</th><th>Engrave</th><th>Group</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="actions" style="margin-top:10px">
+    <button id="add-rect">+ Rectangle</button>
+    <label><button type="button" onclick="document.getElementById('file-input').click()">Upload SVG / DXF</button>
+      <input id="file-input" type="file" accept=".svg,.dxf" multiple hidden></label>
+    <span class="hint">|</span>
+    <button id="ex-lbracket">Example: L-bracket (SVG)</button>
+    <button id="ex-trophy">Example: trophy (rectangles + rod)</button>
+  </div>
+  <p class="hint">Typed rectangles are in the job units below. Files carry their own units; override only if the file has none or is wrong. Rotation: auto lets the nester turn the part; locked keeps the angle you give. Step overrides the job's rotation step for one part.</p>
+</section>
+
+<section id="options-section">
+  <h2>Options</h2>
+  <div class="row">
+    <label class="field">Job name<input id="job-name" type="text" value="job"></label>
+    <label class="field">Version<input id="job-version" type="text" class="short" value="1.0"></label>
+    <label class="field">Units<select id="units"><option value="in">inches</option><option value="mm">millimeters</option></select></label>
+    <label class="field">Sheet<select id="sheet-preset">
+      <option value="laser_24x18">24 x 18 in laser</option>
+      <option value="plywood_4x8">4 x 8 ft plywood (96 x 48 in)</option>
+      <option value="plywood_4x4">4 x 4 ft half sheet</option>
+      <option value="custom">custom</option></select></label>
+    <label class="field">Custom width<input id="sheet-w" type="number" step="any" placeholder="w"></label>
+    <label class="field">Custom height<input id="sheet-h" type="number" step="any" placeholder="h"></label>
+  </div>
+  <div class="row">
+    <span class="field">Cutting method <span class="req">(required, no default)</span>
+      <span><label><input type="radio" name="cutting" value="free"> free (laser, CNC, jigsaw)</label>
+      &nbsp; <label><input type="radio" name="cutting" value="guillotine"> guillotine (table saw, full cuts)</label></span></span>
+    <label class="field">Kerf<input id="kerf" type="number" step="any" value="0.125"></label>
+    <label class="field">Outer edge margin<input id="margin" type="number" step="any" value="0.25"></label>
+    <label class="field">Part spacing<select id="spacing">
+      <option value="kerf-gap">kerf-gap (one kerf between parts)</option>
+      <option value="shared-edge">shared-edge (zero gap)</option>
+      <option value="custom-margin">custom-margin</option></select></label>
+    <label class="field">Custom spacing<input id="spacing-value" type="number" step="any" placeholder="value"></label>
+  </div>
+  <div class="row">
+    <label class="field">Nest mode<select id="nest-mode"><option value="true-outline">true-outline</option><option value="bounding-box">bounding-box</option></select></label>
+    <label class="field">Rotation step<select id="rotation-step">
+      <option value="90">90 (hand tracing, jigsaw)</option><option value="45">45</option><option value="30">30</option>
+      <option value="15">15 (laser / CNC, dense)</option><option value="free">free (laser / CNC, densest, slow)</option></select></label>
+    <label class="field">Deferred groups (comma separated)<input id="deferred" type="text" placeholder="e.g. C"></label>
+    <label class="field">Determinism re-run check<select id="determinism"><option value="1">on (delivered build)</option><option value="0">off (faster iteration)</option></select></label>
+  </div>
+  <h2 style="margin-top:12px">Rods / bars (optional)</h2>
+  <table id="rods"><thead><tr><th>ID</th><th>Piece length</th><th>Qty</th><th>Stock bar length (blank = total only)</th><th></th></tr></thead><tbody></tbody></table>
+  <div class="actions" style="margin-top:8px"><button id="add-rod">+ Rod</button></div>
+</section>
+
+<section>
+  <div class="actions">
+    <button id="btn-echo" disabled>Check parts</button>
+    <button id="btn-build" class="primary" disabled>Build cut sheet</button>
+    <span id="run-status" class="hint"></span>
+  </div>
+</section>
+
+<section id="echo-section" hidden>
+  <h2>Parsed parts (confirm before building)</h2>
+  <table id="echo-table"></table>
+  <div id="echoview"></div>
+</section>
+
+<section id="results-section" hidden>
+  <h2>Result</h2>
+  <div id="banner" class="banner"></div>
+  <div id="summary"></div>
+  <div class="actions" style="margin:8px 0">
+    <button id="btn-print" class="primary">Print cut sheet (save as PDF)</button>
+    <span class="hint">One page per sheet plus the cut list. Use your browser's Save as PDF.</span>
+  </div>
+  <h3>Downloads</h3>
+  <div id="downloads" class="downloads"></div>
+  <h3>Validation</h3>
+  <table id="checks"></table>
+  <h3>Sheets</h3>
+  <div id="sheets"></div>
+</section>
+
+</main>
+<div id="print-pages"></div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v__PYODIDE_VERSION__/full/pyodide.js"></script>
+<script>
+'use strict';
+const PYODIDE_VERSION = "__PYODIDE_VERSION__";
+const ENGINE_ZIP_B64 = "__ENGINE_ZIP_B64__";
+const EXAMPLE_LBRACKET_SVG_B64 = "__EXAMPLE_LBRACKET_SVG_B64__";
+const EXAMPLE_TROPHY_JOB = __EXAMPLE_TROPHY_JOB__;
+
+const $ = (s) => document.querySelector(s);
+const status = (msg, err) => { const el = $('#status'); el.textContent = msg; el.className = err ? 'err' : ''; };
+const uploads = {};   // filename -> base64
+let engine = null;    // { echo(jsonStr)->jsonStr, build(jsonStr)->jsonStr }
+let lastBuild = null;
+
+function b64FromBytes(bytes) { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s); }
+function bytesFromB64(b64) { const s = atob(b64); const out = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i); return out; }
+
+// ---------------- engine ----------------
+async function loadEngine() {
+  if (window.CSB_ENGINE_STUB) { engine = window.CSB_ENGINE_STUB; status('Engine: test stub'); enableRun(); return; }
+  try {
+    status('Loading Python runtime...');
+    const py = await loadPyodide();
+    status('Loading geometry (shapely)...');
+    await py.loadPackage(['micropip', 'shapely']);
+    status('Installing DXF/SVG readers...');
+    const micropip = py.pyimport('micropip');
+    await micropip.install(['ezdxf', 'svgelements']);
+    status('Unpacking engine...');
+    py.FS.mkdirTree('/engine');
+    py.unpackArchive(bytesFromB64(ENGINE_ZIP_B64).buffer, 'zip', { extractDir: '/engine' });
+    py.runPython("import sys; sys.path.insert(0, '/engine')");
+    const api = py.pyimport('cutsheet.webapi');
+    engine = { echo: (j) => api.echo(j), build: (j) => api.build(j) };
+    status('Engine ready (cutsheet __ENGINE_VERSION__, Pyodide ' + PYODIDE_VERSION + ')');
+    enableRun();
+  } catch (e) {
+    status('Engine failed to load: ' + e + '. This page needs internet access to cdn.jsdelivr.net and pypi.org on first load.', true);
+  }
+}
+function enableRun() { $('#btn-echo').disabled = false; $('#btn-build').disabled = false; }
+
+// ---------------- parts table ----------------
+function partRow(p) {
+  const tr = document.createElement('tr');
+  tr.dataset.kind = p.kind;
+  tr.dataset.file = p.file || '';
+  const src = p.kind === 'file'
+    ? `<span title="${p.file}">${p.file}</span>`
+    : `<input type="number" step="any" class="short w" value="${p.w ?? ''}" placeholder="w"> x <input type="number" step="any" class="short h" value="${p.h ?? ''}" placeholder="h">`;
+  const units = p.kind === 'file'
+    ? `<select class="funits"><option value="">from file</option><option value="in">in</option><option value="mm">mm</option><option value="cm">cm</option></select>`
+    : '';
+  tr.innerHTML = `
+    <td><input type="text" class="id" value="${p.id}"></td>
+    <td>${src}</td>
+    <td>${units}</td>
+    <td><input type="number" class="short qty" min="1" value="${p.qty ?? 1}"></td>
+    <td><select class="rot"><option value="auto">auto</option><option value="locked">locked</option></select>
+        <input type="number" step="any" class="short angle" value="0" title="locked angle (deg)"></td>
+    <td><select class="step"><option value="">job</option><option value="90">90</option><option value="45">45</option><option value="30">30</option><option value="15">15</option><option value="free">free</option></select></td>
+    <td><input type="checkbox" class="engrave"></td>
+    <td><input type="text" class="short group" placeholder="group"></td>
+    <td><button class="del" title="remove">x</button></td>`;
+  if (p.rotation) tr.querySelector('.rot').value = p.rotation;
+  if (p.angle != null) tr.querySelector('.angle').value = p.angle;
+  if (p.engrave) tr.querySelector('.engrave').checked = true;
+  if (p.group) tr.querySelector('.group').value = p.group;
+  if (p.funits && p.kind === 'file') tr.querySelector('.funits').value = p.funits;
+  tr.querySelector('.del').onclick = () => tr.remove();
+  $('#parts tbody').appendChild(tr);
+  return tr;
+}
+function rodRow(r) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td><input type="text" class="id" value="${r.id || 'rod'}"></td>
+    <td><input type="number" step="any" class="len" value="${r.length ?? ''}"></td>
+    <td><input type="number" class="short qty" min="1" value="${r.quantity ?? 1}"></td>
+    <td><input type="number" step="any" class="stock" value="${r.stock_length ?? ''}" placeholder="blank"></td>
+    <td><button class="del">x</button></td>`;
+  tr.querySelector('.del').onclick = () => tr.remove();
+  $('#rods tbody').appendChild(tr);
+}
+let rectCounter = 0;
+$('#add-rect').onclick = () => partRow({ kind: 'rect', id: String.fromCharCode(65 + (rectCounter++ % 26)) });
+$('#add-rod').onclick = () => rodRow({});
+$('#file-input').onchange = async (ev) => {
+  for (const f of ev.target.files) {
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    uploads[f.name] = b64FromBytes(bytes);
+    partRow({ kind: 'file', file: f.name, id: f.name.replace(/\.(svg|dxf)$/i, '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 12) || 'part' });
+  }
+  ev.target.value = '';
+};
+$('#ex-lbracket').onclick = () => {
+  uploads['l_bracket_v1.0.svg'] = EXAMPLE_LBRACKET_SVG_B64;
+  partRow({ kind: 'file', file: 'l_bracket_v1.0.svg', id: 'L', qty: 12 });
+  $('#job-name').value = 'l_bracket'; $('#nest-mode').value = 'true-outline';
+  document.querySelector('input[name=cutting][value=free]').checked = true;
+};
+$('#ex-trophy').onclick = () => {
+  const j = EXAMPLE_TROPHY_JOB;
+  for (const p of j.parts) partRow({ kind: 'rect', id: p.id, w: p.width, h: p.height, qty: p.quantity, rotation: p.rotation, angle: p.locked_angle, engrave: p.engrave, group: p.group });
+  for (const r of (j.rods || [])) rodRow(r);
+  $('#job-name').value = j.job_name; $('#nest-mode').value = j.nest_mode; $('#deferred').value = (j.deferred_groups || []).join(',');
+  $('#kerf').value = j.kerf; $('#margin').value = j.outer_edge_margin; $('#sheet-preset').value = j.sheet;
+  document.querySelector(`input[name=cutting][value=${j.cutting_method}]`).checked = true;
+};
+
+// ---------------- job JSON ----------------
+function collectJob() {
+  const cutting = document.querySelector('input[name=cutting]:checked');
+  if (!cutting) throw new Error('Pick a cutting method (free or guillotine). It has no default on purpose.');
+  const units = $('#units').value;
+  const preset = $('#sheet-preset').value;
+  const sheet = preset === 'custom'
+    ? { width: parseFloat($('#sheet-w').value), height: parseFloat($('#sheet-h').value), units }
+    : preset;
+  if (preset === 'custom' && !(sheet.width > 0 && sheet.height > 0)) throw new Error('Custom sheet needs a width and height.');
+  const parts = [];
+  for (const tr of $('#parts tbody').rows) {
+    const p = { id: tr.querySelector('.id').value.trim(), quantity: parseInt(tr.querySelector('.qty').value, 10),
+                rotation: tr.querySelector('.rot').value, locked_angle: parseFloat(tr.querySelector('.angle').value) || 0,
+                engrave: tr.querySelector('.engrave').checked };
+    const g = tr.querySelector('.group').value.trim(); if (g) p.group = g;
+    const st = tr.querySelector('.step').value; if (st) p.rotation_step = st === 'free' ? 'free' : parseFloat(st);
+    if (tr.dataset.kind === 'file') {
+      p.source = { type: 'file', path: tr.dataset.file };
+      const fu = tr.querySelector('.funits').value; if (fu) p.source.units = fu;
+    } else {
+      p.width = parseFloat(tr.querySelector('.w').value); p.height = parseFloat(tr.querySelector('.h').value);
+    }
+    parts.push(p);
+  }
+  const rods = [];
+  for (const tr of $('#rods tbody').rows) {
+    const r = { id: tr.querySelector('.id').value.trim(), length: parseFloat(tr.querySelector('.len').value), quantity: parseInt(tr.querySelector('.qty').value, 10) };
+    const s = tr.querySelector('.stock').value; if (s) r.stock_length = parseFloat(s);
+    rods.push(r);
+  }
+  if (!parts.length && !rods.length) throw new Error('Add at least one part or rod.');
+  const spacing = { mode: $('#spacing').value };
+  if (spacing.mode === 'custom-margin') spacing.value = parseFloat($('#spacing-value').value);
+  const stepSel = $('#rotation-step').value;
+  const deferred = $('#deferred').value.split(',').map(s => s.trim()).filter(Boolean);
+  const job = {
+    job_name: $('#job-name').value.trim() || 'job', units: { input: units, display: units }, sheet,
+    outer_edge_margin: parseFloat($('#margin').value), kerf: parseFloat($('#kerf').value), part_spacing: spacing,
+    cutting_method: cutting.value, nest_mode: $('#nest-mode').value, rotation_step: stepSel === 'free' ? 'free' : parseFloat(stepSel),
+    parts, rods, deferred_groups: deferred, output: { version: $('#job-version').value.trim() || '1.0', author: 'Sam Cao' },
+  };
+  const files = {};
+  for (const p of parts) if (p.source) { if (!uploads[p.source.path]) throw new Error('Missing upload for ' + p.source.path); files[p.source.path] = uploads[p.source.path]; }
+  return { job, files, determinism: $('#determinism').value === '1' };
+}
+
+// ---------------- run ----------------
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function tableFromRows(rows, cols) {
+  return '<thead><tr>' + cols.map(c => `<th>${esc(c)}</th>`).join('') + '</tr></thead><tbody>' +
+    rows.map(r => '<tr>' + cols.map(c => `<td>${esc(r[c] ?? '')}</td>`).join('') + '</tr>').join('') + '</tbody>';
+}
+async function runEcho() {
+  try {
+    const req = collectJob();
+    $('#run-status').textContent = 'Parsing parts...';
+    const res = JSON.parse(await engine.echo(JSON.stringify(req)));
+    if (!res.ok) throw new Error(res.error);
+    $('#echo-table').innerHTML = tableFromRows(res.parts, ['id', 'source', 'width', 'height', 'true_area', 'bbox_fill', 'quantity', 'rotation', 'engrave', 'group', 'nest_mode', 'notes']);
+    $('#echoview').innerHTML = res.echo_svg.replace(/^<\?xml[^>]*>\s*/, '');
+    $('#echo-section').hidden = false;
+    $('#run-status').textContent = `Sheet ${res.summary.sheet}, kerf ${res.summary.kerf}, margin ${res.summary.margin}, gap ${res.summary.gap} (${res.summary.spacing}), ${res.summary.cutting}, ${res.summary.nest_mode}.`;
+  } catch (e) { $('#run-status').textContent = 'Error: ' + e.message; }
+}
+async function runBuild() {
+  try {
+    const req = collectJob();
+    $('#run-status').textContent = 'Nesting, rendering, verifying... (free rotation and big jobs can take a minute)';
+    $('#btn-build').disabled = true;
+    await new Promise(r => setTimeout(r, 30));
+    const res = JSON.parse(await engine.build(JSON.stringify(req)));
+    $('#btn-build').disabled = false;
+    if (!res.ok) throw new Error(res.error);
+    lastBuild = res;
+    renderResults(res);
+    $('#run-status').textContent = 'Done.';
+  } catch (e) { $('#btn-build').disabled = false; $('#run-status').textContent = 'Error: ' + e.message; }
+}
+function renderResults(res) {
+  const s = res.summary;
+  $('#banner').className = 'banner ' + (res.all_passed ? 'ok' : 'bad');
+  $('#banner').textContent = res.all_passed ? 'ALL CHECKS PASSED' : 'CHECKS FAILED - DO NOT CUT FROM THIS LAYOUT';
+  let sum = `<p><b>${s.sheets}</b> sheet(s)` + (s.deferred ? ` (${s.sheets - s.deferred} now, ${s.deferred} deferred)` : '') + `, utilization ${s.utilization.toFixed(1)}%.`;
+  for (const r of s.rods) sum += ` Rod ${esc(r.id)}: ${esc(r.continuous)} continuous` + (r.bars ? `, ${r.bars} bar(s) of ${esc(r.stock)}` : '') + '.';
+  sum += '</p><p class="hint">Engine: ' + esc(Object.entries(s.engines).map(([m, e]) => m + ': ' + e).join('; ')) + '</p>';
+  for (const f of s.fallbacks) sum += `<p class="flag">Fallback: ${esc(f)}</p>`;
+  $('#summary').innerHTML = sum;
+  $('#checks').innerHTML = '<tbody>' + res.checks.map(c => `<tr><td class="${c.passed ? (c.flagged ? 'flag' : 'pass') : 'fail'}">${c.passed ? (c.flagged ? 'PASS*' : 'PASS') : 'FAIL'}</td><td>${esc(c.name)}</td><td class="hint">${esc(c.detail)}</td></tr>`).join('') + '</tbody>';
+  const dl = $('#downloads'); dl.innerHTML = '';
+  for (const [name, text] of Object.entries(res.files)) {
+    const type = name.endsWith('.svg') ? 'image/svg+xml' : name.endsWith('.json') ? 'application/json' : 'text/plain';
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.textContent = name; dl.appendChild(a);
+  }
+  $('#sheets').innerHTML = res.sheets.map(sh => `<div class="sheetview" data-sheet="${sh.index}">${sh.reference_svg.replace(/^<\?xml[^>]*>\s*/, '')}</div>`).join('');
+  $('#results-section').hidden = false;
+  $('#results-section').scrollIntoView({ behavior: 'smooth' });
+}
+function mdToHtml(md) {
+  // Just enough markdown for the cut list: headings, tables, bullets, paragraphs.
+  const lines = md.replace(/^---[\s\S]*?---\n/, '').split('\n'); let out = ''; let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^#+ /.test(l)) { const n = l.match(/^#+/)[0].length; out += `<h${n + 1}>${esc(l.replace(/^#+ /, ''))}</h${n + 1}>`; i++; }
+    else if (l.startsWith('|')) {
+      const rows = []; while (i < lines.length && lines[i].startsWith('|')) { rows.push(lines[i]); i++; }
+      const cells = r => r.split('|').slice(1, -1).map(c => c.trim());
+      out += '<table><thead><tr>' + cells(rows[0]).map(c => `<th>${esc(c)}</th>`).join('') + '</tr></thead><tbody>' +
+        rows.slice(2).map(r => '<tr>' + cells(r).map(c => `<td>${esc(c).replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')}</td>`).join('') + '</tr>').join('') + '</tbody></table>';
+    }
+    else if (l.startsWith('- ')) { const items = []; while (i < lines.length && lines[i].startsWith('- ')) { items.push(lines[i].slice(2)); i++; } out += '<ul>' + items.map(t => `<li>${esc(t).replace(/\*\*(.*?)\*\*/g, '<b>$1</b>').replace(/`(.*?)`/g, '<code>$1</code>')}</li>`).join('') + '</ul>'; }
+    else if (l.trim()) { out += `<p>${esc(l)}</p>`; i++; }
+    else i++;
+  }
+  return out;
+}
+$('#btn-print').onclick = () => {
+  if (!lastBuild) return;
+  const pp = $('#print-pages'); pp.innerHTML = '';
+  for (const sh of lastBuild.sheets) { const d = document.createElement('div'); d.className = 'page'; d.innerHTML = sh.reference_svg.replace(/^<\?xml[^>]*>\s*/, ''); pp.appendChild(d); }
+  const cl = Object.entries(lastBuild.files).find(([n]) => n.includes('_cut_list_'));
+  if (cl) { const d = document.createElement('div'); d.className = 'page'; d.innerHTML = mdToHtml(cl[1]); pp.appendChild(d); }
+  const val = Object.entries(lastBuild.files).find(([n]) => n.endsWith('_validation_' + (lastBuild.files_version || '') ) || (n.includes('_validation_') && n.endsWith('.md')));
+  if (val) { const d = document.createElement('div'); d.className = 'page'; d.innerHTML = mdToHtml(val[1]); pp.appendChild(d); }
+  window.print();
+};
+$('#btn-echo').onclick = runEcho;
+$('#btn-build').onclick = runBuild;
+$('#sheet-preset').onchange = () => { const c = $('#sheet-preset').value === 'custom'; $('#sheet-w').disabled = !c; $('#sheet-h').disabled = !c; };
+$('#sheet-preset').onchange();
+$('#spacing').onchange = () => { $('#spacing-value').disabled = $('#spacing').value !== 'custom-margin'; };
+$('#spacing').onchange();
+$('#units').onchange = () => { const mm = $('#units').value === 'mm'; if (mm && $('#kerf').value === '0.125') { $('#kerf').value = '3'; $('#margin').value = '6'; } if (!mm && $('#kerf').value === '3') { $('#kerf').value = '0.125'; $('#margin').value = '0.25'; } };
+window.CSB = { collectJob, renderResults, runEcho, runBuild };  // exposed for the smoke test
+loadEngine();
+</script>
+<!-- CHANGELOG
+  v1.0 (2026-09-04): Initial release.
+-->
+</body>
+</html>

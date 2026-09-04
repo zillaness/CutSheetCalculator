@@ -1,6 +1,6 @@
 ---
 file: README.md
-version: 1.0.1
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -23,9 +23,25 @@ cut-sheet-builder/          the skill (drop into ~/.claude/skills or /mnt/skills
   scripts/cutsheet/               engine package
   references/                     job schema, intake questions, engine notes
   assets/examples/                acceptance-test jobs (trophy, L-bracket)
-tests/                      pytest suite (acceptance + engine unit tests)
+web/                        static page: template.html + build_web.py -> index.html (self-contained)
+tests/                      pytest suite (acceptance, engine, web API, browser smoke)
 docs/                       PRD
 ```
+
+## Static web page
+
+`web/index.html` is a single file. Open it in a browser (or host it on GitHub Pages): upload SVG/DXF
+files or type rectangles, set quantities and options, check the parsed parts, build, download the
+cut-ready SVG/DXF and reports, and print the cut sheet to PDF (one page per sheet plus the cut list).
+It runs the same Python engine in the browser through Pyodide, so the first load downloads roughly
+15 MB from cdn.jsdelivr.net and pypi.org; after that the browser caches it. Rebuild the page after any
+engine change:
+
+```bash
+python web/build_web.py
+```
+
+The test suite fails if `index.html` is stale.
 
 ## Quickstart
 
@@ -50,3 +66,4 @@ shapely greedy nester. The validation report always says which one ran. See
 ## CHANGELOG
 - v1.0 (2026-09-04): Initial release.
 - v1.0.1 (2026-09-04): Reference link bump.
+- v1.1 (2026-09-04): Static web page section.
