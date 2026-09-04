@@ -1,6 +1,6 @@
 ---
 file: job_schema_v1.0.md
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -42,10 +42,10 @@ starting with `_` (metadata, changelog) are ignored by the engine.
 | `id` | yes | unique string | Label on the render |
 | `quantity` | yes | int >= 1 | |
 | `width`, `height` | yes for typed parts | number > 0 | Ignored when `source` is a file |
-| `source` | for imports | `{ "type": "file", "path": "bracket.dxf", "units"?: "mm", "tolerance"?: 0.005, "scale"?: 1.0 }` | Path relative to the job file. `units` overrides what the file declares. `tolerance` is the curve-flattening chord error in inches |
+| `source` | for imports | `{ "type": "file", "path": "bracket.dxf", "units"?: "mm", "tolerance"?: 0.005, "scale"?: 1.0 }` | Path relative to the job file. `units` overrides what the file declares. `tolerance` is the curve-flattening chord error in inches. DXF layers or SVG groups named engrave/score/etch/mark/raster become engrave geometry on the ENGRAVE layer of the cut files |
 | `rotation` | no | `auto` (default) or `locked` | Explicit. Not inferred from `engrave` |
 | `locked_angle` | no | degrees, default 0 | Orientation when locked; base orientation when auto |
-| `engrave` | no | bool | Informational; shown in legend and cut list |
+| `engrave` | no | bool | Shown in legend and cut list. Set automatically when the imported file has an engrave/score layer |
 | `group` | no | string | For isolation/deferral |
 | `color` | no | CSS color | Reference render only; palette assigned otherwise |
 | `nest_mode` | no | `true-outline` / `bounding-box` | Per-part override |
@@ -87,3 +87,4 @@ Rod math: `n * length + (n - 1) * kerf`. Bars packed first-fit-decreasing.
 ## CHANGELOG
 - v1.0 (2026-09-04): Initial release.
 - v1.1 (2026-09-04): rotation_step accepts "free"; per-part rotation_step override.
+- v1.2 (2026-09-04): engrave layer detection note.

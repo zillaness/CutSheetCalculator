@@ -1,6 +1,6 @@
 """
 file: verify.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -192,6 +192,13 @@ def check_geometry(layout: Layout, rep: Report):
         ok = all(is_guillotine_cuttable([p.bbox for p in s.placements]) for s in layout.sheets)
         rep.add("guillotine cut sequence exists", ok, "every sheet separable by full edge-to-edge cuts" if ok else "a sheet is not guillotine-cuttable")
 
+    # Engrave geometry must sit inside its own part (a rotation/transform bug would put it outside)
+    n_eng = sum(len(pl.engrave) for pl in layout.placements)
+    if n_eng:
+        bad_eng = [pl.key for pl in layout.placements if any(not pl.polygon.buffer(1e-6).covers(g) for g in pl.engrave)]
+        rep.add("engrave geometry inside its part", not bad_eng,
+                f"{n_eng} engrave path(s) placed with their parts" if not bad_eng else f"engraving outside outline: {bad_eng[:10]}")
+
     # Grouping / deferral
     grp_ok = True
     for s in layout.sheets:
@@ -259,3 +266,4 @@ def verify(layout: Layout, reference_svg: Optional[str] = None, determinism: boo
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): Engrave-inside-part check.

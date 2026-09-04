@@ -1,6 +1,6 @@
 """
 file: importers.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -12,15 +12,17 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from typing import Iterable, Optional
 
-from shapely.geometry import Polygon, LinearRing
+from shapely.geometry import Polygon, LinearRing, LineString
 from shapely.validation import make_valid
 
 from . import units as U
 
 DEFAULT_TOLERANCE_IN = 0.005  # chord error when flattening curves, inches
 MIN_RING_AREA_IN2 = 1e-6
+ENGRAVE_LAYER_RE = re.compile(r"engrav|score|etch|mark|raster", re.I)  # layer/group names that mean "engrave, do not cut"
 
 
 class ImportError_(ValueError):
@@ -107,6 +109,7 @@ def _svg_rings(fpath: str, tol_px: float) -> tuple[list[list[tuple[float, float]
         raw_factor = 1.0
 
     rings: list[list[tuple[float, float]]] = []
+    engrave: list[tuple[list[tuple[float, float]], bool]] = []  # (points, closed)
     for el in svg.elements():
         if not isinstance(el, Shape):
             continue
@@ -114,6 +117,7 @@ def _svg_rings(fpath: str, tol_px: float) -> tuple[list[list[tuple[float, float]
             path = Path(el)
         except Exception:
             continue
+        is_engrave = _svg_in_engrave_group(el)
         for sub in path.as_subpaths():
             pts: list[tuple[float, float]] = []
             closed = False
@@ -137,17 +141,51 @@ def _svg_rings(fpath: str, tol_px: float) -> tuple[list[list[tuple[float, float]
                         pts.append((p.x, p.y))
             if not pts:
                 continue
-            if not closed:
-                # Treat a subpath whose ends coincide as closed; otherwise skip it.
-                if abs(pts[0][0] - pts[-1][0]) > tol_px or abs(pts[0][1] - pts[-1][1]) > tol_px:
-                    continue
+            coincident = abs(pts[0][0] - pts[-1][0]) <= tol_px and abs(pts[0][1] - pts[-1][1]) <= tol_px
+            if is_engrave:
+                engrave.append((pts, closed or coincident))
+                continue
+            if not closed and not coincident:
+                continue  # open cut path: skipped (outlines must close)
             rings.append(pts)
-    return rings, raw_factor
+    return rings, raw_factor, engrave
 
 
-def import_svg(fpath: str, file_unit: Optional[str] = None, tolerance_in: float = DEFAULT_TOLERANCE_IN) -> tuple[Polygon, str]:
+def _svg_in_engrave_group(el) -> bool:
+    """True when the element or any ancestor group is named like an engrave layer (id, label, class)."""
+    node = el
+    while node is not None:
+        vals = getattr(node, "values", {}) or {}
+        for key in ("id", "inkscape:label", "{http://www.inkscape.org/namespaces/inkscape}label", "class", "label", "data-name"):
+            v = vals.get(key)
+            if v and ENGRAVE_LAYER_RE.search(str(v)):
+                return True
+        node = getattr(node, "parent", None) if hasattr(node, "parent") else None
+        if node is None:
+            # svgelements stores inherited attributes on values; also check inherited group names
+            break
+    return False
+
+
+def _engrave_geoms(engrave: list, k: float) -> list:
+    out = []
+    for pts, closed in engrave:
+        pts_in = [(x * k, y * k) for (x, y) in pts]
+        if closed:
+            r = _clean_ring(pts_in)
+            if r:
+                poly = Polygon(r)
+                if poly.is_valid and poly.area > MIN_RING_AREA_IN2:
+                    out.append(poly)
+                    continue
+        if len(pts_in) >= 2:
+            out.append(LineString(pts_in))
+    return out
+
+
+def import_svg(fpath: str, file_unit: Optional[str] = None, tolerance_in: float = DEFAULT_TOLERANCE_IN) -> tuple[Polygon, str, list]:
     tol_px = tolerance_in * 96.0
-    rings, raw_factor = _svg_rings(fpath, tol_px)
+    rings, raw_factor, engrave = _svg_rings(fpath, tol_px)
     if file_unit:
         # Interpret the file's raw user units as <file_unit>.
         k = raw_factor * U.TO_BASE[U.normalize_unit(file_unit)]
@@ -157,7 +195,10 @@ def import_svg(fpath: str, file_unit: Optional[str] = None, tolerance_in: float 
         note = "SVG physical size from file width/height (96 px/in). "
     rings_in = [[(x * k, y * k) for (x, y) in r] for r in rings]
     poly, n2 = assemble_polygon(rings_in)
-    return poly, (note + n2).strip()
+    eg = _engrave_geoms(engrave, k)
+    if eg:
+        n2 += f" {len(eg)} engrave path(s) from an engrave/score group."
+    return poly, (note + n2).strip(), eg
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +220,7 @@ def _expand_inserts(entities):
             yield e
 
 
-def import_dxf(fpath: str, file_unit: Optional[str] = None, tolerance_in: float = DEFAULT_TOLERANCE_IN) -> tuple[Polygon, str]:
+def import_dxf(fpath: str, file_unit: Optional[str] = None, tolerance_in: float = DEFAULT_TOLERANCE_IN) -> tuple[Polygon, str, list]:
     import ezdxf
     from ezdxf import path as ezpath, edgeminer, edgesmith
 
@@ -202,12 +243,18 @@ def import_dxf(fpath: str, file_unit: Optional[str] = None, tolerance_in: float 
     ents = list(_expand_inserts(msp))
     closed_rings: list[list[tuple[float, float]]] = []
     open_ents = []
+    engrave: list[tuple[list[tuple[float, float]], bool]] = []
     for e in ents:
         t = e.dxftype()
         if t in ("LWPOLYLINE", "POLYLINE", "CIRCLE", "ELLIPSE", "SPLINE", "ARC", "LINE", "HATCH"):
             if t == "HATCH":
                 continue
             try:
+                layer = str(e.dxf.layer) if e.dxf.hasattr("layer") else ""
+                if ENGRAVE_LAYER_RE.search(layer):
+                    closed = edgesmith.is_closed_entity(e)
+                    engrave.append((_flatten_path(ezpath.make_path(e), tol_file), closed))
+                    continue
                 if edgesmith.is_closed_entity(e):
                     closed_rings.append(_flatten_path(ezpath.make_path(e), tol_file))
                 else:
@@ -234,7 +281,10 @@ def import_dxf(fpath: str, file_unit: Optional[str] = None, tolerance_in: float 
         note += f"{chained} loop(s) chained from lines/arcs. "
     rings_in = [[(x * k, y * k) for (x, y) in r] for r in closed_rings]
     poly, n2 = assemble_polygon(rings_in)
-    return poly, (note + n2).strip()
+    eg = _engrave_geoms(engrave, k)
+    if eg:
+        n2 += f" {len(eg)} engrave path(s) from an engrave/score layer."
+    return poly, (note + n2).strip(), eg
 
 
 def _chain_closed(chain, gap_tol: float) -> bool:
@@ -247,7 +297,8 @@ def _chain_closed(chain, gap_tol: float) -> bool:
 # Entry point
 # ---------------------------------------------------------------------------
 
-def import_outline(fpath: str, file_unit: Optional[str] = None, tolerance=None) -> tuple[Polygon, str]:
+def import_outline(fpath: str, file_unit: Optional[str] = None, tolerance=None) -> tuple[Polygon, str, list]:
+    """Returns (outline polygon in inches, notes, engrave geometries in the same frame)."""
     if not os.path.exists(fpath):
         raise ImportError_(f"outline file not found: {fpath}")
     tol = float(tolerance) if tolerance else DEFAULT_TOLERANCE_IN
@@ -261,3 +312,4 @@ def import_outline(fpath: str, file_unit: Optional[str] = None, tolerance=None) 
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): Engrave/score layer detection (DXF layer names, SVG group names).

@@ -176,7 +176,7 @@ def test_import_svg_and_dxf_agree(tmp_path):
     svg = tmp_path / "l.svg"
     svg.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="4in" height="4in" viewBox="0 0 4 4">'
                    '<path d="M0,0 H4 V1 H1 V4 H0 Z"/><circle cx="0.5" cy="0.5" r="0.15"/></svg>')
-    ps, _ = import_svg(str(svg))
+    ps, _, _ = import_svg(str(svg))
     doc = ezdxf.new("R2010")
     doc.header["$INSUNITS"] = 1
     msp = doc.modelspace()
@@ -186,7 +186,7 @@ def test_import_svg_and_dxf_agree(tmp_path):
     msp.add_circle((0.5, 0.5), 0.15)
     dxf = tmp_path / "l.dxf"
     doc.saveas(str(dxf))
-    pd, note = import_dxf(str(dxf))
+    pd, note, _ = import_dxf(str(dxf))
     assert "chained" in note
     assert ps.area == pytest.approx(pd.area, rel=1e-3)
     assert ps.bounds == pytest.approx(pd.bounds, abs=1e-6)
@@ -200,7 +200,7 @@ def test_dxf_mm_units_converted(tmp_path):
     doc.modelspace().add_lwpolyline([(0, 0), (254, 0), (254, 127), (0, 127)], close=True)
     f = tmp_path / "r.dxf"
     doc.saveas(str(f))
-    p, _ = import_dxf(str(f))
+    p, _, _ = import_dxf(str(f))
     assert p.bounds == pytest.approx((0, 0, 10, 5))
 
 

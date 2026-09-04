@@ -1,6 +1,6 @@
 """
 file: layout.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -16,7 +16,7 @@ from typing import Optional
 from shapely.geometry import Polygon
 from shapely import affinity
 
-from .model import Job, Part, rotated_normalized
+from .model import Job, Part, rotated_normalized, transform_like
 
 
 @dataclass
@@ -41,6 +41,7 @@ class Placement:
     w: float  # placed bbox size
     h: float
     polygon: Polygon  # placed outline in sheet coordinates
+    engrave: list = field(default_factory=list)  # placed engrave geometries in sheet coordinates
 
     @property
     def key(self) -> str:
@@ -80,6 +81,18 @@ class Layout:
 def placed_polygon(part: Part, x: float, y: float, angle: float) -> Polygon:
     poly = rotated_normalized(part.base_polygon(), angle)
     return affinity.translate(poly, x, y)
+
+
+def placed_engrave(part: Part, x: float, y: float, angle: float) -> list:
+    return [transform_like(g, part.base_polygon(), angle, x, y) for g in part.engrave_geoms]
+
+
+def attach_engrave(job: Job, placements: list) -> None:
+    """Fill Placement.engrave for every placement (engines only compute outlines)."""
+    for pl in placements:
+        part = job.part_by_id(pl.part_id)
+        if part.engrave_geoms:
+            pl.engrave = placed_engrave(part, pl.x, pl.y, pl.angle)
 
 
 def expand_instances(parts: list[Part]) -> list[Instance]:
@@ -143,6 +156,7 @@ def build_layout(job: Job) -> Layout:
                 layout.fallbacks.append("guillotine cutting packs bounding boxes; true outlines are still rendered inside them")
         if fb and fb not in layout.fallbacks:
             layout.fallbacks.append(fb)
+        attach_engrave(job, placements)
         # Re-attach the original part outline for rendering when a bbox-override part was packed as a box.
         n_sheets = max((pl.sheet for pl in placements), default=-1) + 1
         sheets = [Sheet(index=sheet_offset + i, group=group, deferred=(group in job.deferred_groups), engine=used)
@@ -162,3 +176,4 @@ def build_layout(job: Job) -> Layout:
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): Placements carry placed engrave geometry.

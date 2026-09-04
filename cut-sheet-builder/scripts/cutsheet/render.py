@@ -1,6 +1,6 @@
 """
 file: render.py
-version: 1.2
+version: 1.3
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -44,6 +44,23 @@ def polygon_path(poly: Polygon, ox: float, oy: float, k: float, flip_h: Optional
     for hole in poly.interiors:
         d += " " + ring(hole.coords[:-1])
     return d
+
+
+def geometry_path(geom, ox: float, oy: float, k: float) -> str:
+    """SVG path data for a Polygon, LineString, or Multi* geometry (open paths stay open)."""
+    def pts(coords, close):
+        d = "M" + " L".join(f"{_fmtnum(ox + x * k)},{_fmtnum(oy + y * k)}" for (x, y) in coords)
+        return d + (" Z" if close else "")
+    t = geom.geom_type
+    if t == "Polygon":
+        return polygon_path(geom, ox, oy, k)
+    if t == "LineString":
+        return pts(geom.coords, False)
+    if t == "LinearRing":
+        return pts(geom.coords[:-1], True)
+    if t.startswith("Multi") or t == "GeometryCollection":
+        return " ".join(geometry_path(g, ox, oy, k) for g in geom.geoms)
+    return ""
 
 
 def _metadata_comment(filename: str, version: str, author: str, description: str) -> str:
@@ -161,6 +178,8 @@ def render_reference_svg(layout: Layout, filename: str, only_sheets=None, with_t
             out.append(f'<g class="part" data-part="{_esc(pl.part_id)}" data-copy="{pl.index}" data-x="{_fmtnum(pl.x)}" data-y="{_fmtnum(pl.y)}" '
                        f'data-w="{_fmtnum(pl.w)}" data-h="{_fmtnum(pl.h)}" data-angle="{_fmtnum(pl.angle)}" data-area="{_fmtnum(pl.polygon.area)}">\n')
             out.append(f'<path d="{d}" fill="{_esc(part.color)}" fill-opacity="0.85" fill-rule="evenodd" stroke="#222" stroke-width="1"/>\n')
+            for g in pl.engrave:
+                out.append(f'<path class="engrave" d="{geometry_path(g, ox, oy, k)}" fill="none" stroke="#111" stroke-width="0.8" stroke-dasharray="3,2"/>\n')
             # Label anchor must sit inside the outline (an L-bracket's bbox center is empty space).
             anchor = pl.polygon.centroid
             if not pl.polygon.contains(anchor):
@@ -253,12 +272,17 @@ def render_cut_svg(layout: Layout, sheet: Sheet, filename: str) -> str:
         out.append(f'<path id="{_esc(pl.key)}" d="{d}"/>\n')
     out.append('</g>\n')
     out.append(f'<g id="ENGRAVE" inkscape:groupmode="layer" inkscape:label="ENGRAVE" fill="none" stroke="#0000ff" stroke-width="0.001">\n')
+    n_eng = 0
+    for pl in sheet.placements:
+        for i, g in enumerate(pl.engrave):
+            out.append(f'<path id="engrave-{_esc(pl.key)}-{i}" d="{geometry_path(g, 0.0, 0.0, kk)}"/>\n')
+            n_eng += 1
     if job.engrave_layer == "outline-guide":
         for pl in sheet.placements:
             if job.part_by_id(pl.part_id).engrave:
                 out.append(f'<path id="guide-{_esc(pl.key)}" d="{polygon_path(pl.polygon, 0.0, 0.0, kk)}"/>\n')
-    else:
-        out.append('<!-- Paste engrave artwork here. Empty on purpose: this skill does not generate artwork. -->\n')
+    elif not n_eng:
+        out.append('<!-- Paste engrave artwork here. Empty on purpose: no engrave/score layer was found in the imports. -->\n')
     out.append('</g>\n')
     out.append(_changelog_comment(job.version))
     out.append('</svg>\n')
@@ -285,10 +309,24 @@ def write_cut_dxf(layout: Layout, sheet: Sheet, path: str) -> Optional[str]:
         pts = [((x) * kk, (H - y) * kk) for (x, y) in coords]  # DXF is y-up
         msp.add_lwpolyline(pts, close=True, dxfattribs={"layer": layer})
 
+    def add_geom(g, layer):
+        t = g.geom_type
+        if t == "Polygon":
+            add_ring(g.exterior.coords[:-1], layer)
+            for hole in g.interiors:
+                add_ring(hole.coords[:-1], layer)
+        elif t == "LineString":
+            msp.add_lwpolyline([(x * kk, (H - y) * kk) for (x, y) in g.coords], close=False, dxfattribs={"layer": layer})
+        elif t.startswith("Multi") or t == "GeometryCollection":
+            for sub in g.geoms:
+                add_geom(sub, layer)
+
     for pl in sheet.placements:
         add_ring(pl.polygon.exterior.coords[:-1], "CUT")
         for hole in pl.polygon.interiors:
             add_ring(hole.coords[:-1], "CUT")
+        for g in pl.engrave:
+            add_geom(g, "ENGRAVE")
         if job.engrave_layer == "outline-guide" and job.part_by_id(pl.part_id).engrave:
             add_ring(pl.polygon.exterior.coords[:-1], "ENGRAVE")
     doc.saveas(path)
@@ -331,6 +369,8 @@ def render_parts_echo_svg(job: Job, filename: str) -> str:
     for p, x, y in items:
         out.append(f'<g class="part" data-part="{_esc(p.id)}" data-w="{_fmtnum(p.width)}" data-h="{_fmtnum(p.height)}">\n')
         out.append(f'<path d="{polygon_path(p.base_polygon(), x, y, k)}" fill="{_esc(p.color)}" fill-opacity="0.85" fill-rule="evenodd" stroke="#222" stroke-width="1"/>\n')
+        for g in p.engrave_geoms:
+            out.append(f'<path class="engrave" d="{geometry_path(g, x, y, k)}" fill="none" stroke="#111" stroke-width="0.8" stroke-dasharray="3,2"/>\n')
         out.append(f'<text x="{_fmtnum(x)}" y="{_fmtnum(y + p.height * k + 14)}" font-size="11" fill="#111">{_esc(p.id)}: {_fmtnum(U.from_base(p.width, du))} x {_fmtnum(U.from_base(p.height, du))} {du}, qty {p.quantity}, {p.source}</text>\n')
         out.append('</g>\n')
     out.append(_changelog_comment(job.version))
@@ -342,3 +382,4 @@ def render_parts_echo_svg(job: Job, filename: str) -> str:
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): only_sheets option for per-sheet pages.
 # v1.2 (2026-09-04): with_table placement table for printed pages.
+# v1.3 (2026-09-04): Engrave geometry on the ENGRAVE layer (SVG/DXF) and in the reference/echo renders.

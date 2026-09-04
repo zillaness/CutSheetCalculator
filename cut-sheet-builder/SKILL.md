@@ -12,7 +12,7 @@ description: >
   plywood", or any request to figure out where parts go on a sheet or how much material
   to buy, even if the word "nest" never appears.
 metadata:
-  version: "1.1"
+  version: "1.2"
   author: Samuel Cao
   created: "2026-09-04"
   last_updated: "2026-09-04"
@@ -76,7 +76,7 @@ CSB="python3 $SKILL_DIR/scripts/cut_sheet_builder.py"
 |---|---|
 | CLI (echo, build, deps, presets) | `scripts/cut_sheet_builder.py` |
 | Engine package | `scripts/cutsheet/` |
-| Job file schema | `references/job_schema_v1.1.md` |
+| Job file schema | `references/job_schema_v1.2.md` |
 | Intake question set | `references/intake_questions_v1.1.md` |
 | Engine and fallback notes | `references/engine_notes_v1.1.md` |
 | Trophy regression job | `assets/examples/trophy_job_v1.0.json` |
@@ -98,7 +98,7 @@ conversation first and ask only the gaps.
 
 ### 2. Write the job JSON
 
-Write `<job>_job_v1.0.json` following `references/job_schema_v1.1.md`. Keep imported
+Write `<job>_job_v1.0.json` following `references/job_schema_v1.2.md`. Keep imported
 outline files next to it (relative `source.path`). Units: set `units.input` to whatever
 the user typed in; the engine stores inches internally and converts back for display.
 
@@ -192,8 +192,8 @@ guillotine), group isolation and deferral order, determinism, and which engine r
   for the cut list if useful. Say this plainly; do not oversell the fallback.
 - Toolpaths, feeds/speeds, laser power, engraving artwork, cost optimization: out of scope.
 - DTF gang sheets: raster artwork, not this skill.
-- Multiple stock sizes in one run, mixed rod+sheet as one deliverable, engrave/cut layer
-  detection on import: v1.x. Do the job in two passes today and say so.
+- Multiple stock sizes in one run, mixed rod+sheet as one deliverable: v1.x. Do the job in
+  two passes today and say so.
 
 ---
 
@@ -207,9 +207,14 @@ guillotine), group isolation and deferral order, determinism, and which engine r
 - Open paths that do not close within tolerance are skipped. If the echo shows no outline,
   the source path is not closed; ask for a closed export from Onshape.
 - The reference SVG for a 4x8 sheet is large. Send it as a file, never inline.
+- Engrave layers: geometry on a DXF layer or SVG group whose name contains engrave, score,
+  etch, mark, or raster is imported as engrave geometry. It rotates and moves with the part,
+  lands on the ENGRAVE layer of the cut files, and flags the part as engrave. Anything else
+  that is not a closed outline is dropped, so an open cut path shows up as "no outline".
 
 ---
 
 ## CHANGELOG
 - v1.0 (2026-09-04): Initial release per cut_sheet_builder_prd_v1.1. Both nest modes, DXF/SVG import, two-dial spacing, rod packing, per-sheet cut files, validation report, acceptance tests.
 - v1.1 (2026-09-04): rotation_step gains `free` mode and a per-part override; intake maps cutting tool to rotation step; fixed a sharp-tip kerf-buffer overlap in the bundled nester.
+- v1.2 (2026-09-04): Engrave/score layer detection on import, PDF cut sheet, static web page (web/index.html) sharing the same engine.

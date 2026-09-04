@@ -1,6 +1,6 @@
 """
 file: model.py
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -60,6 +60,15 @@ def rotated_normalized(poly: Polygon, angle_deg: float) -> Polygon:
     return normalize_polygon(affinity.rotate(poly, angle_deg, origin=(0, 0)))
 
 
+def transform_like(geom, base_poly: Polygon, angle_deg: float, dx: float = 0.0, dy: float = 0.0):
+    """Apply to <geom> the exact rotation + normalization that rotated_normalized applies to base_poly,
+    then translate by (dx, dy). Used so engrave geometry moves with its part."""
+    rp = affinity.rotate(base_poly, angle_deg, origin=(0, 0)) if angle_deg % 360 else base_poly
+    minx, miny, _, _ = rp.bounds
+    g = affinity.rotate(geom, angle_deg, origin=(0, 0)) if angle_deg % 360 else geom
+    return affinity.translate(g, dx - minx, dy - miny)
+
+
 @dataclass
 class Part:
     id: str
@@ -74,6 +83,7 @@ class Part:
     nest_mode: Optional[str] = None  # per-part override
     rotation_step: Optional[object] = None  # per-part override: degrees or "free"
     outline: Optional[Polygon] = None  # base outline in inches, normalized, None for typed rectangles
+    engrave_geoms: list = field(default_factory=list)  # shapely geometries (same frame as outline) from engrave/score layers
     source: str = "typed"
     notes: str = ""
 
@@ -310,6 +320,7 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
             pstep = _parse_rotation_step(pstep, f"{ctx}.rotation_step")
 
         outline = None
+        engrave_geoms = []
         source = "typed"
         notes = ""
         src = pr.get("source")
@@ -318,11 +329,15 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
             if not os.path.isabs(fpath):
                 fpath = os.path.join(base_dir, fpath)
             file_unit = src.get("units")  # None = trust the file
-            outline, notes = importers.import_outline(fpath, file_unit=file_unit, tolerance=src.get("tolerance"))
+            outline, notes, engrave_geoms = importers.import_outline(fpath, file_unit=file_unit, tolerance=src.get("tolerance"))
             source = os.path.basename(fpath)
             if src.get("scale"):
-                outline = affinity.scale(outline, float(src["scale"]), float(src["scale"]), origin=(0, 0))
+                k = float(src["scale"])
+                outline = affinity.scale(outline, k, k, origin=(0, 0))
+                engrave_geoms = [affinity.scale(g, k, k, origin=(0, 0)) for g in engrave_geoms]
+            ominx, ominy, _, _ = outline.bounds
             outline = normalize_polygon(outline)
+            engrave_geoms = [affinity.translate(g, -ominx, -ominy) for g in engrave_geoms]
             minx, miny, maxx, maxy = outline.bounds
             width, height = maxx - minx, maxy - miny
         else:
@@ -336,9 +351,9 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
 
         parts.append(Part(
             id=pid, quantity=qty, width=width, height=height, rotation=rotation,
-            locked_angle=locked_angle, engrave=bool(pr.get("engrave", False)),
+            locked_angle=locked_angle, engrave=bool(pr.get("engrave", False)) or bool(engrave_geoms),
             group=pr.get("group"), color=pr.get("color"), nest_mode=pmode, rotation_step=pstep,
-            outline=outline, source=source, notes=notes,
+            outline=outline, engrave_geoms=engrave_geoms, source=source, notes=notes,
         ))
 
     for i, p in enumerate(parts):
@@ -430,3 +445,4 @@ def parts_table(job: Job) -> list[dict[str, Any]]:
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): rotation_step accepts "free" and a per-part override.
+# v1.2 (2026-09-04): engrave geometry from import travels with the part (transform_like).
