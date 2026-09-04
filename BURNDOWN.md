@@ -12,7 +12,8 @@ Phase 0 usage-mechanics experiment: pending (no meter readings available overnig
 5. Renderer edge-case tests (mm display, 4x8 rulers, deferred filenames).
 
 ## Ledger
-- 01:05 ▶ NEXT: unit 1a, web/ page shell + Pyodide loader + embedded engine bundle (build_web.py)
+- 01:20 ✅ unit 1a: cutsheet.pipeline (shared build path), cutsheet.webapi (JSON in/out for the page), per-sheet reference renders, CLI refactored, 4 webapi tests (37 total)
+- 01:21 ▶ NEXT: unit 1b, web/template.html + build_web.py (embeds engine zip + examples) -> web/index.html
 
 ## Handoff
 (filled at soft-stop or limit)

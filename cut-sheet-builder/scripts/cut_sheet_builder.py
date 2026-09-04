@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 file: cut_sheet_builder.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -30,9 +29,7 @@ from cutsheet.model import SHEET_PRESETS, JobError, load_job, parts_table  # noq
 from cutsheet.importers import ImportError_  # noqa: E402
 
 
-def slug(name: str) -> str:
-    s = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
-    return s or "job"
+from cutsheet.pipeline import slug  # noqa: E402
 
 
 def cmd_deps(_args) -> int:
@@ -87,56 +84,12 @@ def cmd_echo(args) -> int:
 
 
 def cmd_build(args) -> int:
-    from cutsheet.layout import build_layout
-    from cutsheet.render import render_reference_svg, render_cut_svg, write_cut_dxf
-    from cutsheet.report import cut_list_md, validation_md, validation_json, layout_json
-    from cutsheet.verify import verify
+    from cutsheet.pipeline import build_job, slug as _slug
 
     job = load_job(args.job)
-    out_dir = args.out or os.path.join(os.path.dirname(os.path.abspath(args.job)), "out", slug(job.name))
-    os.makedirs(out_dir, exist_ok=True)
-    base = slug(job.name)
-    V = job.version
-    outputs = []
-
-    layout = build_layout(job)
-
-    ref_text = None
-    if layout.placements:
-        ref_name = f"{base}_reference_v{V}.svg"
-        ref_text = render_reference_svg(layout, ref_name)
-        with open(os.path.join(out_dir, ref_name), "w", encoding="utf-8") as fh:
-            fh.write(ref_text)
-        outputs.append(ref_name)
-        for s in layout.sheets:
-            tag = f"sheet{s.index + 1:02d}" + ("_deferred" if s.deferred else "")
-            cut_name = f"{base}_{tag}_cut_v{V}.svg"
-            with open(os.path.join(out_dir, cut_name), "w", encoding="utf-8") as fh:
-                fh.write(render_cut_svg(layout, s, cut_name))
-            outputs.append(cut_name)
-            if not args.no_dxf:
-                dxf_name = f"{base}_{tag}_cut_v{V}.dxf"
-                if write_cut_dxf(layout, s, os.path.join(out_dir, dxf_name)):
-                    outputs.append(dxf_name)
-
-    rep = verify(layout, ref_text, determinism=not args.no_determinism)
-
-    lay_name = f"{base}_layout_v{V}.json"
-    with open(os.path.join(out_dir, lay_name), "w", encoding="utf-8") as fh:
-        fh.write(layout_json(layout, lay_name))
-    outputs.append(lay_name)
-    val_name = f"{base}_validation_v{V}.md"
-    val_json = f"{base}_validation_v{V}.json"
-    with open(os.path.join(out_dir, val_json), "w", encoding="utf-8") as fh:
-        fh.write(validation_json(layout, rep, val_json))
-    outputs.append(val_json)
-    outputs.append(val_name)
-    cl_name = f"{base}_cut_list_v{V}.md"
-    with open(os.path.join(out_dir, cl_name), "w", encoding="utf-8") as fh:
-        fh.write(cut_list_md(layout, cl_name, outputs))
-    outputs.append(cl_name)
-    with open(os.path.join(out_dir, val_name), "w", encoding="utf-8") as fh:
-        fh.write(validation_md(layout, rep, val_name))
+    out_dir = args.out or os.path.join(os.path.dirname(os.path.abspath(args.job)), "out", _slug(job.name))
+    res = build_job(job, out_dir, dxf=not args.no_dxf, determinism=not args.no_determinism)
+    layout, rep = res.layout, res.report
 
     du = job.display_unit
     print(f"Job: {job.name}  ->  {out_dir}")
@@ -157,7 +110,7 @@ def cmd_build(args) -> int:
             tag += "*"
         print(f"  [{tag}] {c.name}: {c.detail}")
     print("\nFiles:")
-    for o in outputs:
+    for o in res.outputs:
         print(f"  {o}")
     if not rep.all_passed:
         print("\nVALIDATION FAILED. Do not cut from this layout.")
@@ -194,3 +147,4 @@ if __name__ == "__main__":
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): build moved to cutsheet.pipeline (shared with the web page).

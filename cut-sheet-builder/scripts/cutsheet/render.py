@@ -1,6 +1,6 @@
 """
 file: render.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -73,8 +73,10 @@ def _ruler_step(job: Job) -> tuple[float, str]:
     return step, du
 
 
-def render_reference_svg(layout: Layout, filename: str) -> str:
+def render_reference_svg(layout: Layout, filename: str, only_sheets=None) -> str:
+    """only_sheets: optional list of sheet indices to draw (one page per sheet for printing)."""
     job = layout.job
+    sheets = [s for s in layout.sheets if only_sheets is None or s.index in set(only_sheets)]
     k = pick_scale(job)
     du = job.display_unit
     W, H = job.sheet_width, job.sheet_height
@@ -88,7 +90,7 @@ def render_reference_svg(layout: Layout, filename: str) -> str:
     legend_h = 40 + legend_row * (len(job.parts) + 1)
     total_w = PAD * 2 + RULER + sheet_px_w
     total_w = max(total_w, 720.0)
-    total_h = HEADER + len(layout.sheets) * (TITLE + RULER + sheet_px_h + GAP) + legend_h + PAD
+    total_h = HEADER + len(sheets) * (TITLE + RULER + sheet_px_h + GAP) + legend_h + PAD
 
     out = []
     out.append('<?xml version="1.0" encoding="UTF-8"?>\n')
@@ -117,7 +119,7 @@ def render_reference_svg(layout: Layout, filename: str) -> str:
 
     step, unit_name = _ruler_step(job)
     y_cursor = HEADER
-    for sheet in layout.sheets:
+    for sheet in sheets:
         ox = PAD + RULER
         oy = y_cursor + TITLE + RULER
         title = f"{sheet.label} of {len(layout.sheets)}"
@@ -318,3 +320,4 @@ def render_parts_echo_svg(job: Job, filename: str) -> str:
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): only_sheets option for per-sheet pages.
