@@ -1,0 +1,16 @@
+# file: requirements.txt
+# version: 1.0
+# author: Sam Cao
+# created: 2026-09-04
+# last_updated: 2026-09-04
+# description: Python dependencies for the cut-sheet-builder skill. rectpack and pynest2d are optional engines; the skill falls back to bundled packers without them.
+# ai_update: Update last_updated and version. Append changelog at bottom.
+shapely>=2.0
+ezdxf>=1.2
+svgelements>=1.9
+pytest>=7
+# Optional engines (uncomment to try; the validation report says which ran):
+# rectpack
+# pynest2d
+# CHANGELOG
+# v1.0 (2026-09-04): Initial release.

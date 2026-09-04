@@ -1,0 +1,27 @@
+{
+  "_metadata": {
+    "file": "l_bracket_job_v1.0.json",
+    "version": "1.0",
+    "author": "Sam Cao",
+    "created": "2026-09-04",
+    "last_updated": "2026-09-04",
+    "description": "Acceptance test 2: irregular outline. L-bracket imported from SVG, 12 copies, autorotate at 90 deg steps, true-outline nesting on a 24x18 sheet.",
+    "ai_update": "Update last_updated and version. Append to _changelog array."
+  },
+  "_changelog": [
+    { "version": "1.0", "date": "2026-09-04", "note": "Initial release." }
+  ],
+  "job_name": "l_bracket",
+  "units": { "input": "in", "display": "in" },
+  "sheet": "laser_24x18",
+  "outer_edge_margin": 0.25,
+  "kerf": 0.125,
+  "part_spacing": { "mode": "kerf-gap" },
+  "cutting_method": "free",
+  "nest_mode": "true-outline",
+  "rotation_step": 90,
+  "parts": [
+    { "id": "L", "quantity": 12, "rotation": "auto", "source": { "type": "file", "path": "l_bracket_v1.0.svg" } }
+  ],
+  "output": { "version": "1.0", "author": "Sam Cao" }
+}

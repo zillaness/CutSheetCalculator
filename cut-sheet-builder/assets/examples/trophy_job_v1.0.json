@@ -1,0 +1,35 @@
+{
+  "_metadata": {
+    "file": "trophy_job_v1.0.json",
+    "version": "1.0",
+    "author": "Sam Cao",
+    "created": "2026-09-04",
+    "last_updated": "2026-09-04",
+    "description": "Acceptance test 1: trophy regression. Parts A-E x15 on 24x18 sheets, 1/4 in margin, 1/8 in kerf-gap, C isolated and deferred, rod calc 30 x 5.25 in. Part dimensions are placeholders until the real trophy dims are entered.",
+    "ai_update": "Update last_updated and version. Append to _changelog array."
+  },
+  "_changelog": [
+    { "version": "1.0", "date": "2026-09-04", "note": "Initial release." }
+  ],
+  "job_name": "trophy",
+  "units": { "input": "in", "display": "in" },
+  "sheet": "laser_24x18",
+  "outer_edge_margin": 0.25,
+  "kerf": 0.125,
+  "part_spacing": { "mode": "kerf-gap" },
+  "cutting_method": "free",
+  "nest_mode": "bounding-box",
+  "rotation_step": 90,
+  "parts": [
+    { "id": "A", "width": 6,   "height": 4,   "quantity": 15, "rotation": "auto" },
+    { "id": "B", "width": 4,   "height": 3,   "quantity": 15, "rotation": "auto" },
+    { "id": "C", "width": 5,   "height": 2,   "quantity": 15, "rotation": "locked", "locked_angle": 0, "engrave": true, "group": "C" },
+    { "id": "D", "width": 3,   "height": 1.5, "quantity": 15, "rotation": "auto" },
+    { "id": "E", "width": 2,   "height": 2,   "quantity": 15, "rotation": "auto" }
+  ],
+  "rods": [
+    { "id": "post", "length": 5.25, "quantity": 30, "stock_length": 36 }
+  ],
+  "deferred_groups": ["C"],
+  "output": { "version": "1.0", "author": "Sam Cao" }
+}

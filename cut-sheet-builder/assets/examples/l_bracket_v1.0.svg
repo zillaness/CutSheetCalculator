@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="4in" height="4in" viewBox="0 0 4 4">
+<!--
+  file: l_bracket_v1.0.svg
+  version: 1.0
+  author: Sam Cao
+  created: 2026-09-04
+  last_updated: 2026-09-04
+  description: Acceptance test 2 input. 4 x 4 in L-bracket, 1 in legs, 0.5 in corner radius on the outer corner, one 0.3 in hole.
+  ai_update: Update last_updated and version. Append changelog comment at bottom.
+-->
+<path d="M0,0 H3.5 A0.5,0.5 0 0 1 4,0.5 V1 H1 V4 H0 Z" fill="none" stroke="#000" stroke-width="0.01"/>
+<circle cx="0.5" cy="0.5" r="0.15" fill="none" stroke="#000" stroke-width="0.01"/>
+<!-- CHANGELOG
+  v1.0 (2026-09-04): Initial release.
+-->
+</svg>
