@@ -1,6 +1,6 @@
 """
 file: webapi.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -47,7 +47,7 @@ def echo(request_json: str) -> str:
             "rods": [{"id": r.id, "length": U.fmt(r.length, du), "quantity": r.quantity,
                       "stock_length": U.fmt(r.stock_length, du) if r.stock_length else ""} for r in job.rods],
             "summary": {
-                "sheet": f"{U.fmt(job.sheet_width, du)} x {U.fmt(job.sheet_height, du)}",
+                "sheet": "; ".join(f"{U.fmt(st.width, du)} x {U.fmt(st.height, du)}" + (f" x{st.quantity}" if st.quantity else "") for st in job.stocks),
                 "kerf": U.fmt(job.kerf, du), "margin": U.fmt(job.outer_edge_margin, du),
                 "gap": U.fmt(job.gap, du), "spacing": job.part_spacing_mode,
                 "cutting": job.cutting_method, "nest_mode": job.nest_mode,
@@ -81,12 +81,13 @@ def build(request_json: str) -> str:
                 rods.append({"id": r["id"], "continuous": U.fmt(r["continuous_length"], du),
                              "bars": r.get("bars_needed"), "stock": U.fmt(r["stock_length"], du) if r.get("stock_length") else ""})
         parts_area = sum(p.polygon.area for p in lay.placements)
-        total = job.sheet_width * job.sheet_height * len(lay.sheets)
+        total = sum(s.area for s in lay.sheets)
         return json.dumps({
             "ok": True,
             "all_passed": res.ok,
             "checks": [{"name": c.name, "passed": c.passed, "flagged": c.flagged, "detail": c.detail} for c in res.report.checks],
-            "sheets": [{"index": s.index, "label": s.label, "group": s.group, "deferred": s.deferred,
+            "sheets": [{"index": s.index, "label": s.label, "group": s.group, "deferred": s.deferred, "stock": s.stock,
+                        "width": s.width, "height": s.height,
                         "count": len(s.placements), "reference_svg": res.sheet_svgs.get(s.index, "")} for s in lay.sheets],
             "summary": {"sheets": len(lay.sheets), "deferred": sum(1 for s in lay.sheets if s.deferred),
                         "utilization": (100 * parts_area / total) if total else 0.0, "rods": rods,
@@ -102,3 +103,4 @@ def build(request_json: str) -> str:
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): Stock list in summaries; per-sheet sizes.

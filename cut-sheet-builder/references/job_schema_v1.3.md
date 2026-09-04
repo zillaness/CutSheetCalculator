@@ -1,6 +1,6 @@
 ---
 file: job_schema_v1.0.md
-version: 1.2
+version: 1.3
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -19,7 +19,8 @@ starting with `_` (metadata, changelog) are ignored by the engine.
 |---|---|---|---|
 | `job_name` | yes | string | Used for output filenames (slugged) |
 | `units` | no | `{ "input": "in", "display": "in" }` | `in`, `ft`, `mm`, `cm`. Display drives reports and cut files |
-| `sheet` | **yes, no default** | preset name, `{ "preset": "..." }`, or `{ "width", "height", "units"? }` | Presets: `laser_24x18`, `plywood_4x8` (96 x 48), `plywood_4x4` |
+| `sheet` | **yes (or `sheets`), no default** | preset name, `{ "preset": "..." }`, or `{ "width", "height", "units"? }` | Presets: `laser_24x18`, `plywood_4x8` (96 x 48), `plywood_4x4` |
+| `sheets` | alternative to `sheet` | list of the above, each with optional `quantity` | Used in list order: offcuts first, full sheets last. Every entry except the last needs a `quantity`; the last is unlimited. A part too big for an early stock falls through to a later one. Running out of stock is an error |
 | `outer_edge_margin` | yes | number >= 0 | Sheet boundary to nearest part |
 | `kerf` | yes | number >= 0 | Cut width |
 | `part_spacing` | no | `{ "mode": "kerf-gap" }` (default), `{ "mode": "shared-edge" }`, `{ "mode": "custom-margin", "value": 0.5 }` | Gap between adjacent parts; independent of `outer_edge_margin` |
@@ -88,3 +89,4 @@ Rod math: `n * length + (n - 1) * kerf`. Bars packed first-fit-decreasing.
 - v1.0 (2026-09-04): Initial release.
 - v1.1 (2026-09-04): rotation_step accepts "free"; per-part rotation_step override.
 - v1.2 (2026-09-04): engrave layer detection note.
+- v1.3 (2026-09-04): sheets list (multiple stock sizes).

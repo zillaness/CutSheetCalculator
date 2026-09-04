@@ -1,6 +1,6 @@
 ---
 file: intake_questions_v1.0.md
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -19,7 +19,8 @@ are never defaulted: sheet size and cutting method.
 1. **Parts.** Typed dimensions (w x h, qty) or files (DXF/SVG) with quantities. For files:
    what unit the file is in if it is not embedded, and which outline if a file holds several.
 2. **Sheet size.** Offer presets: 24 x 18 laser, 4 x 8 plywood (96 x 48), 4 x 4 half sheet,
-   or custom. No default.
+   or custom. No default. Ask whether there are offcuts to use up first (size and count);
+   they go ahead of the main sheet in `sheets`, which fills them before opening full sheets.
 3. **Cutting method.** `free` (laser, CNC, jigsaw: any path) or `guillotine` (table saw,
    panel saw: full edge-to-edge cuts only). No default.
 4. **Kerf.** Typical: 0.125 in table saw blade, 0.008 to 0.012 in laser on plywood/acrylic.
@@ -59,3 +60,4 @@ are never defaulted: sheet size and cutting method.
 ## CHANGELOG
 - v1.0 (2026-09-04): Initial release.
 - v1.1 (2026-09-04): Rotation step guidance by cutting tool; free mode; per-part override.
+- v1.2 (2026-09-04): Offcuts question.

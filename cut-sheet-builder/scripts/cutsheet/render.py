@@ -1,6 +1,6 @@
 """
 file: render.py
-version: 1.3
+version: 1.4
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -77,7 +77,8 @@ def pick_scale(job: Job) -> float:
     """One px-per-inch constant for the whole reference render."""
     if job.raw.get("render", {}).get("px_per_unit"):
         return float(job.px_per_unit)
-    return min(40.0, 1200.0 / job.sheet_width)
+    widest = max([st.width for st in job.stocks] or [job.sheet_width])
+    return min(40.0, 1200.0 / widest)
 
 
 # ---------------------------------------------------------------------------
@@ -98,19 +99,17 @@ def render_reference_svg(layout: Layout, filename: str, only_sheets=None, with_t
     table_rows = sum(len(s.placements) for s in sheets) + len(sheets) if with_table else 0
     k = pick_scale(job)
     du = job.display_unit
-    W, H = job.sheet_width, job.sheet_height
     PAD = 40.0
     HEADER = 96.0
     TITLE = 26.0
     RULER = 22.0
     GAP = 48.0
-    sheet_px_w, sheet_px_h = W * k, H * k
     legend_row = 18.0
     legend_h = 40 + legend_row * (len(job.parts) + 1)
     table_h = (30 + 15 * (table_rows + 1)) if with_table else 0
-    total_w = PAD * 2 + RULER + sheet_px_w
+    total_w = PAD * 2 + RULER + max([sh.width for sh in sheets] or [job.sheet_width]) * k
     total_w = max(total_w, 720.0)
-    total_h = HEADER + len(sheets) * (TITLE + RULER + sheet_px_h + GAP) + legend_h + table_h + PAD
+    total_h = HEADER + sum(TITLE + RULER + sh.height * k + GAP for sh in sheets) + legend_h + table_h + PAD
 
     out = []
     out.append('<?xml version="1.0" encoding="UTF-8"?>\n')
@@ -126,9 +125,10 @@ def render_reference_svg(layout: Layout, filename: str, only_sheets=None, with_t
     # Header
     engines = "; ".join(f"{m}: {e}" for m, e in layout.engines_used.items())
     spacing = job.part_spacing_mode + (f" ({U.fmt(job.custom_margin, du)})" if job.part_spacing_mode == "custom-margin" else "")
+    stock_desc = ", ".join(f"{U.fmt(st.width, du)} x {U.fmt(st.height, du)}" + (f" (x{st.quantity})" if st.quantity else "") for st in job.stocks)
     lines = [
         (f"{job.name}  v{job.version}  {TODAY}", 18, "bold"),
-        (f"Sheet {U.fmt(W, du)} x {U.fmt(H, du)}   |   kerf {U.fmt(job.kerf, du)}   |   outer edge margin {U.fmt(job.outer_edge_margin, du)}   |   part spacing {spacing}   |   cutting {job.cutting_method}", 12, "normal"),
+        (f"Stock {stock_desc}   |   kerf {U.fmt(job.kerf, du)}   |   outer edge margin {U.fmt(job.outer_edge_margin, du)}   |   part spacing {spacing}   |   cutting {job.cutting_method}", 12, "normal"),
         (f"Scale: {_fmtnum(k)} px per inch, identical in x and y on every sheet. Engine: {engines}", 12, "normal"),
         ("Coordinates: x from the left edge, y from the TOP edge of the sheet. Rotation shown on labels as (R<deg>).", 11, "normal"),
     ]
@@ -140,9 +140,11 @@ def render_reference_svg(layout: Layout, filename: str, only_sheets=None, with_t
     step, unit_name = _ruler_step(job)
     y_cursor = HEADER
     for sheet in sheets:
+        W, H = sheet.width, sheet.height
+        sheet_px_w, sheet_px_h = W * k, H * k
         ox = PAD + RULER
         oy = y_cursor + TITLE + RULER
-        title = f"{sheet.label} of {len(layout.sheets)}"
+        title = f"{sheet.label} of {len(layout.sheets)}   {U.fmt(W, du)} x {U.fmt(H, du)}"
         if sheet.group:
             title += f"   group: {sheet.group}"
         title += f"   parts on sheet: {len(sheet.placements)}"
@@ -259,7 +261,7 @@ def render_cut_svg(layout: Layout, sheet: Sheet, filename: str) -> str:
     # SVG accepts in, mm, cm, and pt/px; feet are expressed in inches.
     svg_unit = "in" if du == "ft" else du
     kk = 1.0 / U.TO_BASE[svg_unit]  # inches -> svg_unit
-    W, H = job.sheet_width * kk, job.sheet_height * kk
+    W, H = sheet.width * kk, sheet.height * kk
     out = ['<?xml version="1.0" encoding="UTF-8"?>\n']
     out.append(f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" '
                f'width="{_fmtnum(W)}{svg_unit}" height="{_fmtnum(H)}{svg_unit}" viewBox="0 0 {_fmtnum(W)} {_fmtnum(H)}">\n')
@@ -298,7 +300,7 @@ def write_cut_dxf(layout: Layout, sheet: Sheet, path: str) -> Optional[str]:
     du = job.display_unit
     unit = "in" if du == "ft" else du
     kk = 1.0 / U.TO_BASE[unit]
-    H = job.sheet_height
+    H = sheet.height
     doc = ezdxf.new("R2010")
     doc.header["$INSUNITS"] = U.UNIT_TO_DXF_INSUNITS[unit]
     doc.layers.add("CUT", color=1)
@@ -383,3 +385,4 @@ def render_parts_echo_svg(job: Job, filename: str) -> str:
 # v1.1 (2026-09-04): only_sheets option for per-sheet pages.
 # v1.2 (2026-09-04): with_table placement table for printed pages.
 # v1.3 (2026-09-04): Engrave geometry on the ENGRAVE layer (SVG/DXF) and in the reference/echo renders.
+# v1.4 (2026-09-04): Per-sheet sizes (multiple stock sizes).

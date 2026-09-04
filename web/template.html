@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   file: index.html (built from template.html by build_web.py; do not edit index.html by hand)
-  version: 1.0
+  version: 1.1
   author: Sam Cao
   created: 2026-09-04
   last_updated: __BUILD_DATE__
@@ -118,6 +118,10 @@
     <label class="field">Deferred groups (comma separated)<input id="deferred" type="text" placeholder="e.g. C"></label>
     <label class="field">Determinism re-run check<select id="determinism"><option value="1">on (delivered build)</option><option value="0">off (faster iteration)</option></select></label>
   </div>
+  <h2 style="margin-top:12px">Offcuts / extra sheet sizes used first (optional)</h2>
+  <table id="stocks"><thead><tr><th>Width</th><th>Height</th><th>How many on hand</th><th></th></tr></thead><tbody></tbody></table>
+  <div class="actions" style="margin-top:8px"><button id="add-stock">+ Offcut size</button>
+    <span class="hint">Filled in this order before the main sheet above, which stays unlimited. Job units.</span></div>
   <h2 style="margin-top:12px">Rods / bars (optional)</h2>
   <table id="rods"><thead><tr><th>ID</th><th>Piece length</th><th>Qty</th><th>Stock bar length (blank = total only)</th><th></th></tr></thead><tbody></tbody></table>
   <div class="actions" style="margin-top:8px"><button id="add-rod">+ Rod</button></div>
@@ -239,6 +243,16 @@ function rodRow(r) {
   tr.querySelector('.del').onclick = () => tr.remove();
   $('#rods tbody').appendChild(tr);
 }
+function stockRow(r) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td><input type="number" step="any" class="sw" value="${r.width ?? ''}"></td>
+    <td><input type="number" step="any" class="sh" value="${r.height ?? ''}"></td>
+    <td><input type="number" class="short sq" min="1" value="${r.quantity ?? 1}"></td>
+    <td><button class="del">x</button></td>`;
+  tr.querySelector('.del').onclick = () => tr.remove();
+  $('#stocks tbody').appendChild(tr);
+}
+$('#add-stock').onclick = () => stockRow({});
 let rectCounter = 0;
 $('#add-rect').onclick = () => partRow({ kind: 'rect', id: String.fromCharCode(65 + (rectCounter++ % 26)) });
 $('#add-rod').onclick = () => rodRow({});
@@ -275,6 +289,12 @@ function collectJob() {
     ? { width: parseFloat($('#sheet-w').value), height: parseFloat($('#sheet-h').value), units }
     : preset;
   if (preset === 'custom' && !(sheet.width > 0 && sheet.height > 0)) throw new Error('Custom sheet needs a width and height.');
+  const offcuts = [];
+  for (const tr of $('#stocks tbody').rows) {
+    const o = { width: parseFloat(tr.querySelector('.sw').value), height: parseFloat(tr.querySelector('.sh').value), quantity: parseInt(tr.querySelector('.sq').value, 10), units };
+    if (!(o.width > 0 && o.height > 0 && o.quantity > 0)) throw new Error('Each offcut row needs width, height, and a quantity.');
+    offcuts.push(o);
+  }
   const parts = [];
   for (const tr of $('#parts tbody').rows) {
     const p = { id: tr.querySelector('.id').value.trim(), quantity: parseInt(tr.querySelector('.qty').value, 10),
@@ -302,11 +322,12 @@ function collectJob() {
   const stepSel = $('#rotation-step').value;
   const deferred = $('#deferred').value.split(',').map(s => s.trim()).filter(Boolean);
   const job = {
-    job_name: $('#job-name').value.trim() || 'job', units: { input: units, display: units }, sheet,
+    job_name: $('#job-name').value.trim() || 'job', units: { input: units, display: units },
     outer_edge_margin: parseFloat($('#margin').value), kerf: parseFloat($('#kerf').value), part_spacing: spacing,
     cutting_method: cutting.value, nest_mode: $('#nest-mode').value, rotation_step: stepSel === 'free' ? 'free' : parseFloat(stepSel),
     parts, rods, deferred_groups: deferred, output: { version: $('#job-version').value.trim() || '1.0', author: 'Sam Cao' },
   };
+  if (offcuts.length) job.sheets = [...offcuts, sheet]; else job.sheet = sheet;
   const files = {};
   for (const p of parts) if (p.source) { if (!uploads[p.source.path]) throw new Error('Missing upload for ' + p.source.path); files[p.source.path] = uploads[p.source.path]; }
   return { job, files, determinism: $('#determinism').value === '1' };
@@ -348,7 +369,9 @@ function renderResults(res) {
   const s = res.summary;
   $('#banner').className = 'banner ' + (res.all_passed ? 'ok' : 'bad');
   $('#banner').textContent = res.all_passed ? 'ALL CHECKS PASSED' : 'CHECKS FAILED - DO NOT CUT FROM THIS LAYOUT';
-  let sum = `<p><b>${s.sheets}</b> sheet(s)` + (s.deferred ? ` (${s.sheets - s.deferred} now, ${s.deferred} deferred)` : '') + `, utilization ${s.utilization.toFixed(1)}%.`;
+  const bySize = {}; for (const sh of res.sheets) bySize[sh.stock] = (bySize[sh.stock] || 0) + 1;
+  let sum = `<p><b>${s.sheets}</b> sheet(s)` + (s.deferred ? ` (${s.sheets - s.deferred} now, ${s.deferred} deferred)` : '') +
+    (Object.keys(bySize).length > 1 ? ' (' + Object.entries(bySize).map(([k, v]) => `${esc(k)}: ${v}`).join(', ') + ')' : '') + `, utilization ${s.utilization.toFixed(1)}%.`;
   for (const r of s.rods) sum += ` Rod ${esc(r.id)}: ${esc(r.continuous)} continuous` + (r.bars ? `, ${r.bars} bar(s) of ${esc(r.stock)}` : '') + '.';
   sum += '</p><p class="hint">Engine: ' + esc(Object.entries(s.engines).map(([m, e]) => m + ': ' + e).join('; ')) + '</p>';
   for (const f of s.fallbacks) sum += `<p class="flag">Fallback: ${esc(f)}</p>`;
@@ -403,6 +426,7 @@ loadEngine();
 </script>
 <!-- CHANGELOG
   v1.0 (2026-09-04): Initial release.
+  v1.1 (2026-09-04): Offcut / extra sheet size rows (multiple stock sizes).
 -->
 </body>
 </html>

@@ -1,6 +1,6 @@
 """
 file: test_web_page.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -131,5 +131,20 @@ def test_trophy_example_populates_rods_and_deferred(page):
     assert c["rotation"] == "locked" and c["engrave"] is True and c["group"] == "C"
 
 
+def test_offcut_rows_become_sheets_list(page):
+    page.reload()
+    page.wait_for_function("document.querySelector('#status').textContent.includes('Engine')")
+    page.click("#ex-trophy")
+    page.click("#add-stock")
+    page.fill("#stocks tbody tr:last-child .sw", "12")
+    page.fill("#stocks tbody tr:last-child .sh", "12")
+    page.fill("#stocks tbody tr:last-child .sq", "2")
+    job = json.loads(page.evaluate("JSON.stringify(window.CSB.collectJob())"))["job"]
+    assert "sheet" not in job
+    assert job["sheets"][0] == {"width": 12, "height": 12, "quantity": 2, "units": "in"}
+    assert job["sheets"][-1] == "laser_24x18"
+
+
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): Offcut rows test.

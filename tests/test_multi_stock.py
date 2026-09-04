@@ -77,5 +77,23 @@ def test_single_sheet_job_unchanged():
     assert lay.sheets[0].width == 24 and lay.sheets[0].stock == "laser_24x18"
 
 
+
+def test_multi_stock_full_pipeline_verifies_and_renders(tmp_path):
+    from cutsheet.pipeline import build_job
+    job = _job([{"width": 12, "height": 12, "quantity": 2}, "laser_24x18"],
+               [{"id": "A", "width": 5, "height": 5, "quantity": 12}], deferred_groups=[])
+    res = build_job(job, str(tmp_path), dxf=True, determinism=True)
+    assert res.ok, [c for c in res.report.checks if not c.passed]
+    names = {c.name for c in res.report.checks}
+    assert "stock quantities honored" in names
+    s1 = open(tmp_path / "ms_sheet01_cut_v1.0.svg").read()
+    s3 = open(tmp_path / "ms_sheet03_cut_v1.0.svg").read()
+    assert 'width="12in" height="12in"' in s1 and 'width="24in" height="18in"' in s3
+    ref = res.reference_svg
+    assert "12 in x 12 in" in ref and "24 in x 18 in" in ref
+    cl = open(tmp_path / "ms_cut_list_v1.0.md").read()
+    assert "By size: 12x12in: 2, laser_24x18: 1" in cl
+
+
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.

@@ -12,7 +12,7 @@ description: >
   plywood", or any request to figure out where parts go on a sheet or how much material
   to buy, even if the word "nest" never appears.
 metadata:
-  version: "1.2"
+  version: "1.3"
   author: Samuel Cao
   created: "2026-09-04"
   last_updated: "2026-09-04"
@@ -76,8 +76,8 @@ CSB="python3 $SKILL_DIR/scripts/cut_sheet_builder.py"
 |---|---|
 | CLI (echo, build, deps, presets) | `scripts/cut_sheet_builder.py` |
 | Engine package | `scripts/cutsheet/` |
-| Job file schema | `references/job_schema_v1.2.md` |
-| Intake question set | `references/intake_questions_v1.1.md` |
+| Job file schema | `references/job_schema_v1.3.md` |
+| Intake question set | `references/intake_questions_v1.2.md` |
 | Engine and fallback notes | `references/engine_notes_v1.2.md` |
 | Trophy regression job | `assets/examples/trophy_job_v1.0.json` |
 | Irregular-outline job + SVG | `assets/examples/l_bracket_job_v1.0.json`, `l_bracket_v1.0.svg` |
@@ -88,7 +88,7 @@ CSB="python3 $SKILL_DIR/scripts/cut_sheet_builder.py"
 
 ### 1. Interview (always)
 
-Run `user-input-protocol` with the question set in `references/intake_questions_v1.1.md`.
+Run `user-input-protocol` with the question set in `references/intake_questions_v1.2.md`.
 Ask in that order. `cutting_method` and sheet size are never defaulted; everything else has
 a sensible default the file names, but confirm anything that changes material use (kerf,
 margin, spacing mode, rotation policy for engraved or grained parts).
@@ -98,7 +98,7 @@ conversation first and ask only the gaps.
 
 ### 2. Write the job JSON
 
-Write `<job>_job_v1.0.json` following `references/job_schema_v1.2.md`. Keep imported
+Write `<job>_job_v1.0.json` following `references/job_schema_v1.3.md`. Keep imported
 outline files next to it (relative `source.path`). Units: set `units.input` to whatever
 the user typed in; the engine stores inches internally and converts back for display.
 
@@ -171,6 +171,9 @@ bounding-box corner. The DXF flips to y-up internally so it overlays the SVG cor
   override the job's step.
 - **Groups.** `group` on a part; `isolated_groups` get their own sheets; `deferred_groups`
   are isolated and numbered last, hatched and titled in the render, `_deferred` in filenames.
+- **Stock.** `sheet` for one size, or `sheets` in the order to use them (offcuts with a
+  quantity first, the unlimited full sheet last). Each sheet in the output carries its own
+  size; the validation report checks quantities were not exceeded.
 - **Determinism.** Fixed ordering (area desc, id, copy). Same input, same layout, checked.
 
 ---
@@ -192,8 +195,8 @@ guillotine), group isolation and deferral order, determinism, and which engine r
   for the cut list if useful. Say this plainly; do not oversell the fallback.
 - Toolpaths, feeds/speeds, laser power, engraving artwork, cost optimization: out of scope.
 - DTF gang sheets: raster artwork, not this skill.
-- Multiple stock sizes in one run, mixed rod+sheet as one deliverable: v1.x. Do the job in
-  two passes today and say so.
+- Mixed rod+sheet jobs already come out of one run (rods section in the cut list). Multiple
+  sheet sizes: list them under `sheets`, offcuts first with quantities, full sheet last.
 
 ---
 
@@ -218,3 +221,4 @@ guillotine), group isolation and deferral order, determinism, and which engine r
 - v1.0 (2026-09-04): Initial release per cut_sheet_builder_prd_v1.1. Both nest modes, DXF/SVG import, two-dial spacing, rod packing, per-sheet cut files, validation report, acceptance tests.
 - v1.1 (2026-09-04): rotation_step gains `free` mode and a per-part override; intake maps cutting tool to rotation step; fixed a sharp-tip kerf-buffer overlap in the bundled nester.
 - v1.2 (2026-09-04): Engrave/score layer detection on import, PDF cut sheet, static web page (web/index.html) sharing the same engine.
+- v1.3 (2026-09-04): Multiple stock sizes (`sheets` list, offcuts first).

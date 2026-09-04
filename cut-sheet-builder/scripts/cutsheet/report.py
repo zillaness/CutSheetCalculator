@@ -1,6 +1,6 @@
 """
 file: report.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -44,7 +44,8 @@ def cut_list_md(layout: Layout, filename: str, outputs: list[str]) -> str:
     L.append(f"# Cut list: {job.name}\n\n")
     spacing = job.part_spacing_mode + (f" = {U.fmt(job.custom_margin, du)}" if job.part_spacing_mode == "custom-margin" else "")
     L.append("| Setting | Value |\n|---|---|\n")
-    L.append(f"| Sheet | {U.fmt(job.sheet_width, du)} x {U.fmt(job.sheet_height, du)}" + (f" (preset {job.sheet_preset})" if job.sheet_preset else "") + " |\n")
+    stock_desc = "; ".join(f"{U.fmt(st.width, du)} x {U.fmt(st.height, du)}" + (f" ({st.preset})" if st.preset else "") + (f" x{st.quantity} available" if st.quantity else "") for st in job.stocks)
+    L.append(f"| Stock | {stock_desc}" + (" (used in this order)" if job.multi_stock else "") + " |\n")
     L.append(f"| Kerf | {U.fmt(job.kerf, du)} |\n")
     L.append(f"| Outer edge margin | {U.fmt(job.outer_edge_margin, du)} |\n")
     L.append(f"| Part spacing | {spacing} (gap {U.fmt(job.gap, du)}) |\n")
@@ -57,10 +58,15 @@ def cut_list_md(layout: Layout, filename: str, outputs: list[str]) -> str:
     n_sheets = len(layout.sheets)
     n_def = sum(1 for s in layout.sheets if s.deferred)
     parts_area = sum(pl.polygon.area for pl in layout.placements)
-    total = job.sheet_width * job.sheet_height * n_sheets
+    total = sum(s.area for s in layout.sheets)
     L.append("## Stock summary\n\n")
     if n_sheets:
         L.append(f"- Sheets needed: **{n_sheets}**" + (f" ({n_sheets - n_def} now, {n_def} deferred)" if n_def else "") + "\n")
+        if job.multi_stock:
+            counts = {}
+            for s in layout.sheets:
+                counts[s.stock] = counts.get(s.stock, 0) + 1
+            L.append("- By size: " + ", ".join(f"{k}: {v}" for k, v in counts.items()) + "\n")
         L.append(f"- Utilization: {100 * parts_area / total:.1f}% of sheet area used, {100 * (1 - parts_area / total):.1f}% waste\n")
     if layout.rod_result:
         for r in layout.rod_result["rods"]:
@@ -80,7 +86,7 @@ def cut_list_md(layout: Layout, filename: str, outputs: list[str]) -> str:
 
     # Per sheet
     for s in layout.sheets:
-        title = f"## {s.label} of {n_sheets}"
+        title = f"## {s.label} of {n_sheets} ({U.fmt(s.width, du)} x {U.fmt(s.height, du)})"
         if s.group:
             title += f" (group {s.group})"
         if s.deferred:
@@ -158,11 +164,12 @@ def layout_json(layout: Layout, filename: str) -> str:
         "job": job.name,
         "units": "in",
         "sheet": {"width": job.sheet_width, "height": job.sheet_height, "preset": job.sheet_preset},
+        "stocks": [{"width": st.width, "height": st.height, "quantity": st.quantity, "preset": st.preset} for st in job.stocks],
         "kerf": job.kerf, "outer_edge_margin": job.outer_edge_margin, "part_spacing_mode": job.part_spacing_mode, "gap": job.gap,
         "cutting_method": job.cutting_method, "nest_mode": job.nest_mode,
         "engines_used": layout.engines_used, "fallbacks": layout.fallbacks,
         "sheets": [
-            {"index": s.index, "group": s.group, "deferred": s.deferred,
+            {"index": s.index, "group": s.group, "deferred": s.deferred, "width": s.width, "height": s.height, "stock": s.stock,
              "placements": [{"part": p.part_id, "copy": p.index, "x": p.x, "y": p.y, "angle": p.angle, "w": p.w, "h": p.h,
                              "outline": [list(c) for c in p.polygon.exterior.coords[:-1]],
                              "holes": [[list(c) for c in h.coords[:-1]] for h in p.polygon.interiors]}
@@ -176,3 +183,4 @@ def layout_json(layout: Layout, filename: str) -> str:
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-04): Per-sheet sizes and stock list in reports.

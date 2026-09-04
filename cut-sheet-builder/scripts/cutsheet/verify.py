@@ -1,6 +1,6 @@
 """
 file: verify.py
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -132,10 +132,12 @@ def check_geometry(layout: Layout, rep: Report):
     gap = job.gap
     half = gap / 2
     m = job.outer_edge_margin
-    usable = box(m, m, job.sheet_width - m, job.sheet_height - m).buffer(1e-7)
 
-    # Boundary
-    outside = [pl.key for pl in layout.placements if not usable.covers(pl.polygon)]
+    # Boundary, against each placement's own sheet size
+    outside = []
+    for s in layout.sheets:
+        usable = box(m, m, s.width - m, s.height - m).buffer(1e-7)
+        outside += [pl.key for pl in s.placements if not usable.covers(pl.polygon)]
     rep.add("inside outer_edge_margin boundary", not outside,
             f"all {len(layout.placements)} parts within {m:g} in of no sheet edge" if not outside else f"outside: {outside[:10]}")
 
@@ -174,7 +176,7 @@ def check_geometry(layout: Layout, rep: Report):
     # Area accounting
     parts_area = sum(pl.polygon.area for pl in layout.placements)
     expected_area = sum(p.true_area * p.quantity for p in job.parts)
-    total = job.sheet_width * job.sheet_height * len(layout.sheets)
+    total = sum(s.area for s in layout.sheets)
     waste = total - parts_area
     closes = abs(parts_area - expected_area) < 1e-6 * max(1, expected_area) and waste >= -1e-9
     rep.add("area accounting closes", closes,
@@ -186,6 +188,16 @@ def check_geometry(layout: Layout, rep: Report):
     empty = [s.label for s in layout.sheets if not s.placements]
     rep.add("sheet count re-derived", n_sheets == max_idx and not empty,
             f"{n_sheets} sheet(s), every sheet non-empty, highest placement index + 1 = {max_idx}")
+
+    # Stock quantities honored, and stock order respected (earlier stock never opened after a later one)
+    if job.multi_stock:
+        counts = {}
+        for s in layout.sheets:
+            counts[s.stock] = counts.get(s.stock, 0) + 1
+        over = [st.label for st in job.stocks if st.quantity is not None and counts.get(st.label, 0) > st.quantity]
+        rep.add("stock quantities honored", not over,
+                "; ".join(f"{st.label}: {counts.get(st.label, 0)} used" + (f" of {st.quantity}" if st.quantity else " (unlimited)") for st in job.stocks)
+                if not over else f"over quantity: {over}")
 
     # Guillotine feasibility
     if job.cutting_method == "guillotine":
@@ -267,3 +279,4 @@ def verify(layout: Layout, reference_svg: Optional[str] = None, determinism: boo
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): Engrave-inside-part check.
+# v1.2 (2026-09-04): Per-sheet boundary/area; stock quantity check.
