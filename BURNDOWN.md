@@ -18,7 +18,10 @@ Phase 0 usage-mechanics experiment: pending (no meter readings available overnig
 - 02:05 ✅ unit 2: PDF cut sheet (one page per sheet, placement table under each sheet) via cairosvg + pypdf, CLI --no-pdf flag, tests (44 total)
 - 02:35 ✅ unit 3: engrave/score layer detection (DXF layer names, SVG group names), transported through rotation/placement, ENGRAVE layer in cut SVG/DXF, drawn on reference/echo, verify check, 3 tests (47 total)
 - 02:55 ✅ unit 4: nester slides top-6 anchors (L-bracket column 14.75->12.5 in, gusset 17.6->16.8 in); all-rectangle jobs routed to MaxRects even in true-outline mode (trophy sheet 1: 12->19 parts); engine notes updated
-- 02:56 ▶ NEXT: queue item 5, renderer edge-case tests (mm display, 4x8 ft rulers, deferred filenames, custom sheet, shared-edge cut file); then handoff
+- 03:05 ✅ unit 5: renderer edge-case tests (mm cut file, ft rulers + 12.5 px/in on 4x8, custom sheet + slugged/deferred filenames, shared-edge touching, echo, locked 90) (53 total); GitHub Pages workflow (main only, needs Pages enabled)
+- 03:06 ▶ NEXT (for the 05:16 wake-up): v1.x item "multiple stock sizes in one run" (job.sheets list; pack largest parts to the sheet they fit; report per size). Design first in engine_notes, keep tests green at every step. Then per-sheet split of reference SVG files into out/ (cheap), then re-check web/index.html staleness test.
 
-## Handoff
-(filled at soft-stop or limit)
+## Handoff (interim, 03:06)
+Done tonight: static web page (Pyodide, single file, Playwright-tested against real engine output), shared pipeline + JSON web API, PDF cut sheet with placement tables, engrave/score layer import through to ENGRAVE layers, denser nesting (top-6 slide, rectangles to MaxRects), 16 new tests (53 total). All pushed to claude/cut-sheet-builder-prd-7sgek3.
+Not verified: the page's live Pyodide load (CDN blocked in this sandbox). First thing for Sam: open web/index.html in a browser with internet and watch the status line reach "Engine ready". If micropip cannot install ezdxf, DXF import in the page fails while SVG still works; the CLI is unaffected.
+Open for Sam: real trophy A-E dimensions; enable GitHub Pages (source: GitHub Actions) if hosting is wanted; pynest2d still untested.

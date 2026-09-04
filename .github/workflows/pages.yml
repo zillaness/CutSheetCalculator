@@ -1,0 +1,36 @@
+# file: pages.yml
+# version: 1.0
+# author: Sam Cao
+# created: 2026-09-04
+# last_updated: 2026-09-04
+# description: Publishes web/index.html (the static cut-sheet-builder page) to GitHub Pages on pushes to main. Enable Pages with source "GitHub Actions" in the repo settings first.
+# ai_update: Update last_updated and version. Append changelog at bottom.
+name: Publish static page
+on:
+  push:
+    branches: [main]
+    paths: [web/index.html]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deployment
+        uses: actions/deploy-pages@v4
+# CHANGELOG
+# v1.0 (2026-09-04): Initial release.
