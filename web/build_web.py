@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 file: build_web.py
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -30,11 +30,14 @@ EXAMPLES = os.path.join(ROOT, "cut-sheet-builder", "assets", "examples")
 def engine_zip_b64() -> str:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for name in sorted(os.listdir(ENGINE)):
-            if name.endswith(".py"):
-                info = zipfile.ZipInfo(f"cutsheet/{name}", date_time=(2026, 1, 1, 0, 0, 0))  # stable zip -> stable html
-                with open(os.path.join(ENGINE, name), "rb") as fh:
-                    z.writestr(info, fh.read(), compress_type=zipfile.ZIP_DEFLATED)
+        for root, dirs, files in os.walk(ENGINE):
+            dirs[:] = sorted(d for d in dirs if d != "__pycache__")
+            for name in sorted(files):
+                if name.endswith((".py", ".ttf", ".txt")):
+                    rel = os.path.relpath(os.path.join(root, name), os.path.dirname(ENGINE))
+                    info = zipfile.ZipInfo(rel.replace(os.sep, "/"), date_time=(2026, 1, 1, 0, 0, 0))  # stable zip -> stable html
+                    with open(os.path.join(root, name), "rb") as fh:
+                        z.writestr(info, fh.read(), compress_type=zipfile.ZIP_DEFLATED)
     return base64.b64encode(buf.getvalue()).decode()
 
 
@@ -76,3 +79,4 @@ if __name__ == "__main__":
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): Pyodide 0.27.7.
+# v1.2 (2026-09-05): Engine zip includes subpackages and font files.
