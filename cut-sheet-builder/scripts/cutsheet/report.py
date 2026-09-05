@@ -1,6 +1,6 @@
 """
 file: report.py
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -114,6 +114,26 @@ def cut_list_md(layout: Layout, filename: str, outputs: list[str]) -> str:
             else:
                 L.append(f"Continuous length required: {U.fmt(r['continuous_length'], du)} (no stock length given).\n\n")
 
+    lr = layout.label_report
+    if lr is not None and lr.enabled:
+        L.append("## Labels\n\n")
+        L.append(f"- Machine: {lr.machine}" + (f" (profile {job.profile})" if job.profile else "") +
+                 (f", marking tool {U.fmt(job.marking_tool_diameter, du)}" if job.marking_tool_diameter else "") + "\n")
+        L.append(f"- Font: {lr.font}; requested cap height {U.fmt(lr.requested_height, du)}, minimum {U.fmt(lr.min_height, du)} ({lr.basis}), effective {U.fmt(lr.effective_height, du)}\n")
+        if lr.render_only:
+            L.append("- Hand cutting: labels appear on the reference sheets and PDF only; cut files carry none.\n")
+        elif job.machine == "laser":
+            L.append(f"- Laser setup: set the ENGRAVE layer to **{'fill (raster)' if lr.font == 'outline' else 'line (score)'}**.\n")
+        elif job.machine == "router":
+            L.append(f"- Router setup: run layer {job.labels.dxf_layer} as an engraving toolpath with the {U.fmt(job.marking_tool_diameter, du)} tool before the profile pass.\n")
+        if lr.spacing_bump:
+            L.append(f"- Part spacing raised from {U.fmt(lr.spacing_bump[0], du)} to {U.fmt(lr.spacing_bump[1], du)} so beside-cutout labels fit in the waste.\n")
+        L.append("- Outcome: " + ", ".join(f"{k} {v}" for k, v in sorted(lr.counts.items())) + "\n")
+        for ev in lr.events:
+            L.append(f"  - {ev.key} (sheet {ev.sheet + 1}): requested {ev.requested}, result {ev.result}: {ev.reason}\n")
+        for key, orig, laid in lr.substitutions:
+            L.append(f"  - {key}: text '{orig}' written as '{laid}' (unsupported characters)\n")
+        L.append("\n")
     L.append("## Files\n\n")
     for o in outputs:
         L.append(f"- `{o}`\n")
@@ -168,11 +188,21 @@ def layout_json(layout: Layout, filename: str) -> str:
         "kerf": job.kerf, "outer_edge_margin": job.outer_edge_margin, "part_spacing_mode": job.part_spacing_mode, "gap": job.gap,
         "cutting_method": job.cutting_method, "nest_mode": job.nest_mode,
         "engines_used": layout.engines_used, "fallbacks": layout.fallbacks,
+        "machine": job.machine, "marking_tool_diameter": job.marking_tool_diameter, "profile": job.profile, "outputs": job.outputs,
+        "labels": ({"enabled": True, "font": layout.label_report.font, "effective_height": layout.label_report.effective_height,
+                    "min_height": layout.label_report.min_height, "basis": layout.label_report.basis,
+                    "spacing_bump": layout.label_report.spacing_bump, "counts": layout.label_report.counts,
+                    "events": [vars(e) for e in layout.label_report.events]}
+                   if layout.label_report is not None and layout.label_report.enabled else {"enabled": False}),
         "sheets": [
             {"index": s.index, "group": s.group, "deferred": s.deferred, "width": s.width, "height": s.height, "stock": s.stock,
              "placements": [{"part": p.part_id, "copy": p.index, "x": p.x, "y": p.y, "angle": p.angle, "w": p.w, "h": p.h,
                              "outline": [list(c) for c in p.polygon.exterior.coords[:-1]],
-                             "holes": [[list(c) for c in h.coords[:-1]] for h in p.polygon.interiors]}
+                             "holes": [[list(c) for c in h.coords[:-1]] for h in p.polygon.interiors],
+                             "label": ({"mode": p.label.mode, "text": p.label.text, "font": p.label.font, "cap_height": p.label.cap_height,
+                                        "x": p.label.x, "y": p.label.y, "angle": p.label.angle, "render_only": p.label.render_only}
+                                       if p.label is not None else None),
+                             "label_reason": p.label_reason}
                             for p in s.placements]}
             for s in layout.sheets
         ],
@@ -184,3 +214,4 @@ def layout_json(layout: Layout, filename: str) -> str:
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): Per-sheet sizes and stock list in reports.
+# v1.2 (2026-09-05): Labels section in the cut list; label fields in the layout JSON.

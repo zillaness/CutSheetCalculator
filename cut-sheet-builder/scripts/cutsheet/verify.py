@@ -1,6 +1,6 @@
 """
 file: verify.py
-version: 1.2
+version: 1.3
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -247,6 +247,67 @@ def check_rods(layout: Layout, rep: Report):
     rep.add("rod/bar stock math re-derived", ok, "; ".join(details))
 
 
+def check_labels(layout: Layout, rep: Report):
+    """PRD piece_labeling 7.8. Only when labels are on."""
+    lr = layout.label_report
+    if lr is None or not lr.enabled:
+        return
+    job = layout.job
+    rep.add("labels: machine, font, and minimum height", True,
+            f"machine {lr.machine}" + (f" (profile {job.profile})" if job.profile else "") +
+            (f", tool {job.marking_tool_diameter:g} in" if job.marking_tool_diameter else "") +
+            f", font {lr.font}; minimum {lr.min_height:.3f} in ({lr.basis}); requested {lr.requested_height:.3f} in; effective {lr.effective_height:.3f} in",
+            flagged=lr.effective_height > lr.requested_height + 1e-9)
+    counts = ", ".join(f"{k} {v}" for k, v in sorted(lr.counts.items()))
+    detail = counts
+    if lr.events:
+        detail += ". " + " | ".join(f"{e.key}: {e.requested} -> {e.result} ({e.reason})" for e in lr.events)
+    rep.add("labels: placement per part", True, detail, flagged=bool(lr.events))
+    if lr.substitutions:
+        rep.add("labels: character set", True, "; ".join(f"{k}: '{o}' -> '{l}'" for k, o, l in lr.substitutions), flagged=True)
+    if lr.spacing_bump:
+        parts_area = sum(pl.polygon.area for pl in layout.placements)
+        total = sum(s.area for s in layout.sheets)
+        rep.add("labels: spacing bump", True,
+                f"part spacing {lr.spacing_bump[0]:.3f} -> {lr.spacing_bump[1]:.3f} in for beside-cutout labels; utilization now {100 * parts_area / total:.1f}%", flagged=True)
+    if lr.render_only:
+        rep.add("labels: hand job", True, "labels drawn on the reference/PDF only; cut files unchanged")
+        return
+    # Geometry: on-piece inside the part; beside-cutout clear of every part (by pad + kerf/2) and every other label
+    grow = job.labels.clearance_pad + job.kerf / 2 - 1e-6
+    bad_inside, bad_clear = [], []
+    for s in layout.sheets:
+        m = job.outer_edge_margin
+        usable = box(m, m, s.width - m, s.height - m).buffer(1e-7)
+        boxes = []
+        for pl in s.placements:
+            lb = pl.label
+            if lb is None:
+                continue
+            if not usable.covers(lb.box):
+                bad_clear.append(pl.key + " (outside margin)")
+            if lb.mode == "on-piece":
+                if not pl.polygon.buffer(1e-6).covers(lb.box):
+                    bad_inside.append(pl.key)
+            else:
+                q = lb.box.buffer(grow) if grow > 0 else lb.box
+                for other in s.placements:
+                    if q.intersection(other.polygon).area > 1e-9:
+                        bad_clear.append(f"{pl.key} vs {other.key}")
+                        break
+                for ob in boxes:
+                    if lb.box.intersection(ob).area > 1e-9:
+                        bad_clear.append(pl.key + " vs another label")
+                        break
+                boxes.append(lb.box)
+    n_on = lr.counts.get("on-piece", 0)
+    n_beside = lr.counts.get("beside-cutout", 0)
+    if n_on:
+        rep.add("labels inside their part", not bad_inside, f"{n_on} on-piece label box(es) covered by their outline" if not bad_inside else f"outside: {bad_inside[:10]}")
+    if n_beside:
+        rep.add("labels clear of cuts and each other", not bad_clear, f"{n_beside} beside-cutout label(s) clear of every part by pad + kerf/2 and of each other" if not bad_clear else f"collisions: {bad_clear[:10]}")
+
+
 def check_engine(layout: Layout, rep: Report):
     used = "; ".join(f"{m}: {e}" for m, e in layout.engines_used.items()) or "none (rods only)"
     if layout.fallbacks:
@@ -270,6 +331,7 @@ def verify(layout: Layout, reference_svg: Optional[str] = None, determinism: boo
     if layout.placements:
         check_geometry(layout, rep)
     check_rods(layout, rep)
+    check_labels(layout, rep)
     check_engine(layout, rep)
     if determinism and layout.placements:
         check_determinism(layout, rep)
@@ -280,3 +342,4 @@ def verify(layout: Layout, reference_svg: Optional[str] = None, determinism: boo
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): Engrave-inside-part check.
 # v1.2 (2026-09-04): Per-sheet boundary/area; stock quantity check.
+# v1.3 (2026-09-05): Label checks (height, outcomes, inside-part, clearance, spacing bump).

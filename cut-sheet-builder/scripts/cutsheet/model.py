@@ -1,6 +1,6 @@
 """
 file: model.py
-version: 1.3
+version: 1.4
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -31,6 +31,14 @@ SPACING_MODES = ("kerf-gap", "shared-edge", "custom-margin")
 CUTTING_METHODS = ("free", "guillotine")
 NEST_MODES = ("bounding-box", "true-outline")
 ROTATION_POLICIES = ("auto", "locked")
+MACHINES = ("laser", "router", "plasma", "waterjet", "hand")
+LABEL_MODES = ("none", "on-piece", "beside-cutout")
+LABEL_FONTS = ("single-line", "outline")
+LABEL_TEXTS = ("id", "id+copy")
+LABEL_ORIENTATIONS = ("upright", "follow-part")
+LABEL_FALLBACKS = ("on-piece", "drop")
+OUTPUT_KINDS = ("reference", "svg", "dxf", "pdf")
+PROFILES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "profiles")
 FREE_ROTATION = "free"
 FREE_COARSE_STEP = 15.0   # coarse grid searched before the fine pass in free mode
 FREE_REFINE_SPAN = 7.0    # degrees either side of the best coarse angle
@@ -70,6 +78,24 @@ def transform_like(geom, base_poly: Polygon, angle_deg: float, dx: float = 0.0, 
 
 
 @dataclass
+class LabelSettings:
+    """Job-level label settings (PRD piece_labeling v1.1, section 7.9). Lengths in base units (inches)."""
+    mode: str = "none"
+    font: Optional[str] = None            # None = derived from machine (router: single-line, laser: outline)
+    text: str = "id"                      # id | id+copy
+    cap_height: Optional[float] = None    # None = machine default
+    orientation: str = "upright"
+    auto_spacing: bool = True
+    min_spacing: float = 0.0
+    clearance_pad: float = 0.06
+    on_piece_inset: Optional[float] = None  # None = one tool diameter (router) / one kerf (laser), min 0.05
+    legibility_factor: float = 5.0
+    laser_min_height: float = 0.12
+    fallback: str = "on-piece"
+    dxf_layer: str = "ENGRAVE"
+
+
+@dataclass
 class Part:
     id: str
     quantity: int
@@ -84,6 +110,8 @@ class Part:
     rotation_step: Optional[object] = None  # per-part override: degrees or "free"
     outline: Optional[Polygon] = None  # base outline in inches, normalized, None for typed rectangles
     engrave_geoms: list = field(default_factory=list)  # shapely geometries (same frame as outline) from engrave/score layers
+    label_mode: Optional[str] = None   # per-part override of labels.mode
+    label_text: Optional[str] = None   # per-part text on the piece (defaults to the id)
     source: str = "typed"
     notes: str = ""
 
@@ -176,16 +204,71 @@ class Job:
     author: str = "Sam Cao"
     px_per_unit: float = 40.0  # reference render: pixels per inch
     engrave_layer: str = "none"  # none | outline-guide
+    machine: Optional[str] = None
+    marking_tool_diameter: Optional[float] = None  # base units
+    outputs: Optional[list] = None  # None = everything available
+    profile: Optional[str] = None
+    labels: LabelSettings = field(default_factory=LabelSettings)
+    spacing_bump: Optional[tuple] = None  # (configured gap, effective gap) when labels raised the spacing
     raw: dict = field(default_factory=dict)
 
     @property
-    def gap(self) -> float:
-        """Gap between adjacent parts, from the part_spacing_mode dial."""
+    def configured_gap(self) -> float:
+        """Gap between adjacent parts, from the part_spacing_mode dial alone."""
         if self.part_spacing_mode == "kerf-gap":
             return self.kerf
         if self.part_spacing_mode == "shared-edge":
             return 0.0
         return self.custom_margin
+
+    @property
+    def gap(self) -> float:
+        """Effective gap: the configured gap, raised when beside-cutout labels need the corridor."""
+        if self.spacing_bump is not None:
+            return self.spacing_bump[1]
+        return self.configured_gap
+
+    # ---- labels -------------------------------------------------------------------------
+    @property
+    def labels_enabled(self) -> bool:
+        return self.labels.mode != "none" or any(p.label_mode not in (None, "none") for p in self.parts)
+
+    @property
+    def label_font(self) -> str:
+        if self.labels.font:
+            return self.labels.font
+        return "single-line" if self.machine == "router" else "outline"
+
+    def label_min_height(self) -> tuple[float, str]:
+        """(minimum cap height in inches, basis text) per PRD 7.3."""
+        L = self.labels
+        if self.machine == "router":
+            d = self.marking_tool_diameter or 0.0
+            if self.label_font == "outline":
+                return 8.0 * d, f"router, outline font: 8 x tool diameter {d:.4g} in (discouraged: endmill fill)"
+            return L.legibility_factor * d, f"router, single-line: {L.legibility_factor:g} x tool diameter {d:.4g} in"
+        if self.machine == "laser":
+            if self.label_font == "outline":
+                return L.laser_min_height, f"laser, outline (raster): {L.laser_min_height:.3g} in floor"
+            return max(0.10, L.laser_min_height - 0.02), "laser, single-line (score): 0.10 in floor"
+        if self.machine == "hand":
+            return 0.25, "hand: printed reference must survive a photocopy"
+        return 0.0, "no machine"
+
+    def label_cap_height(self) -> float:
+        """Requested cap height, or the machine default when unset (inches)."""
+        if self.labels.cap_height is not None:
+            return self.labels.cap_height
+        mn, _ = self.label_min_height()
+        if self.machine == "router":
+            return max(0.35, mn)
+        if self.machine == "hand":
+            return 0.35
+        return max(0.20, mn)
+
+    def default_on_piece_inset(self) -> float:
+        d = self.marking_tool_diameter if self.machine == "router" and self.marking_tool_diameter else self.kerf
+        return max(0.05, d)
 
     @property
     def usable_width(self) -> float:
@@ -265,6 +348,43 @@ def _parse_stocks(raw: dict, input_unit: str) -> list[Stock]:
     return [_parse_one_stock(raw["sheet"], input_unit, "sheet")]
 
 
+def _parse_outputs(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = [value]
+    outs = []
+    for v in value:
+        outs.append(_choice(v, OUTPUT_KINDS, "outputs"))
+    return outs
+
+
+def _validate_labels(job: "Job") -> None:
+    """Machine rules from PRD 7.1 and the spacing bump from 7.5. Only when labels are on."""
+    if not job.labels_enabled:
+        return
+    if job.machine is None:
+        raise JobError("labels are on, so 'machine' is required (laser, router, plasma, waterjet, hand); it has no default")
+    if job.machine in ("plasma", "waterjet"):
+        raise JobError(f"machine '{job.machine}' cannot mark pieces reliably; set labels.mode to 'none' or change the machine")
+    if job.machine == "router" and not job.marking_tool_diameter:
+        raise JobError("machine 'router' with labels on requires 'marking_tool_diameter' (no default)")
+    if job.labels.font == "outline" and job.machine == "router":
+        pass  # allowed, discouraged; the echo warns and the minimum is 8 x tool
+    modes = {p.label_mode or job.labels.mode for p in job.parts}
+    if "beside-cutout" in modes and job.machine != "hand":
+        from .fonts import layout_text
+        cap = max(job.label_cap_height(), job.label_min_height()[0])
+        th = layout_text("Hg", cap, job.label_font).height
+        clearance = th + 2 * job.labels.clearance_pad + job.kerf  # the cut eats kerf/2 into the waste on each side
+        need = max(job.labels.min_spacing, clearance)
+        if job.labels.auto_spacing:
+            if need > job.configured_gap + 1e-9:
+                job.spacing_bump = (job.configured_gap, need)
+        elif job.configured_gap <= 1e-9:
+            raise JobError("beside-cutout labels with shared-edge spacing and auto_spacing off: there is no waste to write in")
+
+
 def _parse_rotation_step(value, ctx: str):
     """Degrees (a positive divisor of 360) or the string "free"."""
     if isinstance(value, str) and value.strip().lower() == FREE_ROTATION:
@@ -291,8 +411,61 @@ def load_job(path: str) -> Job:
     return job_from_dict(raw, base_dir=os.path.dirname(os.path.abspath(path)))
 
 
+def _load_profile(name: str, base_dir: str) -> dict:
+    """Find <name>.json in the job's profiles/ folder or the shipped assets/profiles folder."""
+    candidates = [os.path.join(base_dir, "profiles", f"{name}.json"), os.path.join(PROFILES_DIR, f"{name}.json")]
+    for c in candidates:
+        if os.path.exists(c):
+            with open(c, encoding="utf-8") as fh:
+                data = json.load(fh)
+            return {k: v for k, v in data.items() if not k.startswith("_") and k != "name"}
+    available = sorted(os.path.splitext(f)[0] for d in (os.path.join(base_dir, "profiles"), PROFILES_DIR)
+                       if os.path.isdir(d) for f in os.listdir(d) if f.endswith(".json"))
+    raise JobError(f"profile '{name}' not found; available: {available}")
+
+
+def _merge_profile(raw: dict, profile: dict) -> dict:
+    """Profile fields are defaults; job fields win. labels and part_spacing merge key by key."""
+    merged = dict(profile)
+    for k, v in raw.items():
+        if k in ("labels", "part_spacing") and isinstance(v, dict) and isinstance(merged.get(k), dict):
+            merged[k] = {**merged[k], **v}
+        else:
+            merged[k] = v
+    return merged
+
+
+def _parse_labels(raw: dict, L) -> LabelSettings:
+    d = raw.get("labels") or {}
+    if isinstance(d, str):
+        d = {"mode": d}
+    ls = LabelSettings()
+    ls.mode = _choice(d.get("mode", "none"), LABEL_MODES, "labels.mode")
+    if d.get("font") is not None:
+        ls.font = _choice(d["font"], LABEL_FONTS, "labels.font")
+    ls.text = _choice(d.get("text", "id"), LABEL_TEXTS, "labels.text")
+    ls.cap_height = L(d["cap_height"]) if d.get("cap_height") is not None else None
+    ls.orientation = _choice(d.get("orientation", "upright"), LABEL_ORIENTATIONS, "labels.orientation")
+    ls.auto_spacing = bool(d.get("auto_spacing", True))
+    ls.min_spacing = L(d.get("min_spacing", 0.0))
+    ls.clearance_pad = L(d.get("clearance_pad", 0.06))
+    ls.on_piece_inset = L(d["on_piece_inset"]) if d.get("on_piece_inset") is not None else None
+    ls.legibility_factor = float(d.get("legibility_factor", 5.0))
+    ls.laser_min_height = L(d.get("laser_min_height", 0.12))
+    ls.fallback = _choice(d.get("fallback", "on-piece"), LABEL_FALLBACKS, "labels.fallback")
+    ls.dxf_layer = str(d.get("dxf_layer", "ENGRAVE"))
+    for k in ("cap_height", "min_spacing", "clearance_pad", "laser_min_height"):
+        if getattr(ls, k) is not None and getattr(ls, k) < 0:
+            raise JobError(f"labels.{k} must be >= 0")
+    return ls
+
+
 def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
     from . import importers  # local import so shapely-only users can import model cheaply
+
+    profile_name = raw.get("profile")
+    if profile_name:
+        raw = _merge_profile(raw, _load_profile(str(profile_name), base_dir))
 
     name = raw.get("job_name") or raw.get("name")
     if not name:
@@ -359,6 +532,11 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
         pstep = pr.get("rotation_step")
         if pstep is not None:
             pstep = _parse_rotation_step(pstep, f"{ctx}.rotation_step")
+        plabel = pr.get("label") or {}
+        if isinstance(plabel, str):
+            plabel = {"text": plabel}
+        p_label_mode = _choice(plabel["mode"], LABEL_MODES, f"{ctx}.label.mode") if plabel.get("mode") is not None else None
+        p_label_text = str(plabel["text"]) if plabel.get("text") is not None else None
 
         outline = None
         engrave_geoms = []
@@ -394,6 +572,7 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
             id=pid, quantity=qty, width=width, height=height, rotation=rotation,
             locked_angle=locked_angle, engrave=bool(pr.get("engrave", False)) or bool(engrave_geoms),
             group=pr.get("group"), color=pr.get("color"), nest_mode=pmode, rotation_step=pstep,
+            label_mode=p_label_mode, label_text=p_label_text,
             outline=outline, engrave_geoms=engrave_geoms, source=source, notes=notes,
         ))
 
@@ -437,8 +616,14 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
         version=str(out.get("version", "1.0")), author=str(out.get("author", "Sam Cao")),
         px_per_unit=float(render.get("px_per_unit", 40.0)),
         engrave_layer=str(out.get("engrave_layer", "none")),
+        machine=_choice(raw["machine"], MACHINES, "machine") if raw.get("machine") else None,
+        marking_tool_diameter=L(raw["marking_tool_diameter"]) if raw.get("marking_tool_diameter") is not None else None,
+        outputs=_parse_outputs(raw.get("outputs")),
+        profile=str(profile_name) if profile_name else None,
+        labels=_parse_labels(raw, L),
         raw=raw,
     )
+    _validate_labels(job)
     for st in stocks:
         uw, uh = job.usable(st)
         if uw <= 0 or uh <= 0:
@@ -494,3 +679,4 @@ def parts_table(job: Job) -> list[dict[str, Any]]:
 # v1.1 (2026-09-04): rotation_step accepts "free" and a per-part override.
 # v1.2 (2026-09-04): engrave geometry from import travels with the part (transform_like).
 # v1.3 (2026-09-04): Stock list ('sheets') with quantities, priority order.
+# v1.4 (2026-09-05): machine, marking_tool_diameter, outputs, profile, labels (job and per part), spacing bump.

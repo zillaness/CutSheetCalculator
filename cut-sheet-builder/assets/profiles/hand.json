@@ -1,0 +1,37 @@
+{
+  "_metadata": {
+    "file": "hand.json",
+    "version": "1.0",
+    "author": "Sam Cao",
+    "created": "2026-09-05",
+    "last_updated": "2026-09-05",
+    "description": "Table saw / hand tools from a printed cut sheet; labels on the PDF only. PLACEHOLDER NUMBERS: replace with the real machine values before relying on them.",
+    "ai_update": "Update last_updated and version. Append to _changelog array."
+  },
+  "_changelog": [
+    {
+      "version": "1.0",
+      "date": "2026-09-05",
+      "note": "Initial placeholder profile."
+    }
+  ],
+  "name": "hand",
+  "machine": "hand",
+  "sheet": "plywood_4x8",
+  "kerf": 0.125,
+  "outer_edge_margin": 0.5,
+  "part_spacing": {
+    "mode": "kerf-gap"
+  },
+  "cutting_method": "guillotine",
+  "nest_mode": "bounding-box",
+  "rotation_step": 90,
+  "labels": {
+    "mode": "none",
+    "cap_height": 0.35
+  },
+  "outputs": [
+    "reference",
+    "pdf"
+  ]
+}

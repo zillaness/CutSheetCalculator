@@ -1,0 +1,39 @@
+{
+  "_metadata": {
+    "file": "laser_24x18_raster.json",
+    "version": "1.0",
+    "author": "Sam Cao",
+    "created": "2026-09-05",
+    "last_updated": "2026-09-05",
+    "description": "Shop laser, 24 x 18 in bed, labels as raster-filled outline text. PLACEHOLDER NUMBERS: replace with the real machine values before relying on them.",
+    "ai_update": "Update last_updated and version. Append to _changelog array."
+  },
+  "_changelog": [
+    {
+      "version": "1.0",
+      "date": "2026-09-05",
+      "note": "Initial placeholder profile."
+    }
+  ],
+  "name": "laser_24x18_raster",
+  "machine": "laser",
+  "sheet": "laser_24x18",
+  "kerf": 0.01,
+  "outer_edge_margin": 0.25,
+  "part_spacing": {
+    "mode": "kerf-gap"
+  },
+  "cutting_method": "free",
+  "nest_mode": "true-outline",
+  "rotation_step": 15,
+  "labels": {
+    "mode": "none",
+    "font": "outline",
+    "cap_height": 0.25
+  },
+  "outputs": [
+    "reference",
+    "svg",
+    "pdf"
+  ]
+}

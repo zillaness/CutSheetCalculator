@@ -23,7 +23,7 @@ FONTS = ("single-line", "outline")
 CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -_./#:"
 SUBSTITUTE = "?"
 OUTLINE_TTF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "label_sans_subset.ttf")
-LETTER_SPACING = 0.08  # fraction of cap height added between glyphs
+LETTER_SPACING = 0.05  # fraction of cap height added between glyphs
 SPACE_ADVANCE = 0.6    # fraction of cap height for a space in single-line
 
 

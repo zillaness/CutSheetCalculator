@@ -1,0 +1,41 @@
+{
+  "_metadata": {
+    "file": "router_1_8.json",
+    "version": "1.0",
+    "author": "Sam Cao",
+    "created": "2026-09-05",
+    "last_updated": "2026-09-05",
+    "description": "Shop CNC router with a 1/8 in marking tool, labels as single-line text, DXF into CAM. PLACEHOLDER NUMBERS: replace with the real machine values before relying on them.",
+    "ai_update": "Update last_updated and version. Append to _changelog array."
+  },
+  "_changelog": [
+    {
+      "version": "1.0",
+      "date": "2026-09-05",
+      "note": "Initial placeholder profile."
+    }
+  ],
+  "name": "router_1_8",
+  "machine": "router",
+  "marking_tool_diameter": 0.125,
+  "sheet": "plywood_4x8",
+  "kerf": 0.25,
+  "outer_edge_margin": 0.5,
+  "part_spacing": {
+    "mode": "custom-margin",
+    "value": 0.25
+  },
+  "cutting_method": "free",
+  "nest_mode": "true-outline",
+  "rotation_step": 90,
+  "labels": {
+    "mode": "none",
+    "font": "single-line",
+    "cap_height": 0.75
+  },
+  "outputs": [
+    "reference",
+    "dxf",
+    "pdf"
+  ]
+}

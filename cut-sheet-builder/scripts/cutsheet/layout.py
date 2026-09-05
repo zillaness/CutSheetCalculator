@@ -1,6 +1,6 @@
 """
 file: layout.py
-version: 1.3
+version: 1.4
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -42,6 +42,8 @@ class Placement:
     h: float
     polygon: Polygon  # placed outline in sheet coordinates
     engrave: list = field(default_factory=list)  # placed engrave geometries in sheet coordinates
+    label: object = None       # labels.Label or None
+    label_reason: str = ""     # why there is no label, when label is None and labels are on
 
     @property
     def key(self) -> str:
@@ -79,6 +81,7 @@ class Layout:
     engines_used: dict = field(default_factory=dict)  # mode -> engine name
     fallbacks: list[str] = field(default_factory=list)  # human-readable fallback notes
     rod_result: Optional[dict] = None
+    label_report: object = None  # labels.LabelReport
 
     @property
     def placements(self) -> list[Placement]:
@@ -202,6 +205,8 @@ def build_layout(job: Job) -> Layout:
 
     if job.rods:
         layout.rod_result = pack_rods(job.rods, job.kerf)
+    from .labels import place_labels
+    layout.label_report = place_labels(job, layout)
     return layout
 
 
@@ -210,3 +215,4 @@ def build_layout(job: Job) -> Layout:
 # v1.1 (2026-09-04): Placements carry placed engrave geometry.
 # v1.2 (2026-09-04): All-rectangle jobs use the rectangle packer even in true-outline mode.
 # v1.3 (2026-09-04): Stock list loop; sheets carry their own size and stock label.
+# v1.4 (2026-09-05): Placements carry labels; build_layout runs label placement.

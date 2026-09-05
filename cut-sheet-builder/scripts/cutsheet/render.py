@@ -1,6 +1,6 @@
 """
 file: render.py
-version: 1.4
+version: 1.5
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -61,6 +61,35 @@ def geometry_path(geom, ox: float, oy: float, k: float) -> str:
     if t.startswith("Multi") or t == "GeometryCollection":
         return " ".join(geometry_path(g, ox, oy, k) for g in geom.geoms)
     return ""
+
+
+def reference_label_text(pl) -> str:
+    """The reference render's tag: part id plus a rotation marker. Shared so nothing invents a second format."""
+    label = pl.part_id
+    if pl.angle % 360 != 0:
+        label += f" (R{_fmtnum(pl.angle)})"
+    return label
+
+
+def label_geometry_svg(lb, ox: float, oy: float, k: float, cut_file: bool = False) -> str:
+    """SVG for one placed label. In the reference render: thin dark strokes / dark fill.
+    In a cut file: hairline blue strokes (single-line) or blue fill (outline) on the ENGRAVE layer."""
+    parts = []
+    for i, g in enumerate(lb.geoms):
+        d = geometry_path(g, ox, oy, k)
+        if not d:
+            continue
+        if cut_file:
+            if lb.font == "outline":
+                parts.append(f'<path class="label" d="{d}" fill="#0000ff" fill-rule="evenodd" stroke="none"/>\n')
+            else:
+                parts.append(f'<path class="label" d="{d}"/>\n')
+        else:
+            if lb.font == "outline":
+                parts.append(f'<path class="label" d="{d}" fill="#111" fill-opacity="0.85" fill-rule="evenodd" stroke="none"/>\n')
+            else:
+                parts.append(f'<path class="label" d="{d}" fill="none" stroke="#111" stroke-width="1.2" stroke-linecap="round"/>\n')
+    return "".join(parts)
 
 
 def _metadata_comment(filename: str, version: str, author: str, description: str) -> str:
@@ -188,16 +217,19 @@ def render_reference_svg(layout: Layout, filename: str, only_sheets=None, with_t
                 anchor = pl.polygon.representative_point()
             cx = ox + anchor.x * k
             cy = oy + anchor.y * k
-            label = pl.part_id
-            if pl.angle % 360 != 0:
-                label += f" (R{_fmtnum(pl.angle)})"
+            label = reference_label_text(pl)
             px_h = pl.h * k
             px_w = pl.w * k
             fs = 12 if min(px_w, px_h) >= 26 else (9 if min(px_w, px_h) >= 16 else 7)
-            out.append(f'<text x="{_fmtnum(cx)}" y="{_fmtnum(cy + (fs / 3 if px_h < 44 else -1))}" font-size="{fs}" font-weight="bold" fill="#111" text-anchor="middle">{_esc(label)}</text>\n')
-            if px_h >= 44 and px_w >= 60:
-                dims = f"{_fmtnum(U.from_base(part.width, du))} x {_fmtnum(U.from_base(part.height, du))}"
-                out.append(f'<text x="{_fmtnum(cx)}" y="{_fmtnum(cy + 12)}" font-size="9" fill="#222" text-anchor="middle">{_esc(dims)}</text>\n')
+            if pl.label is not None:
+                # The real label geometry is drawn; the text tag moves to the top-left so the two do not overlap.
+                out.append(label_geometry_svg(pl.label, ox, oy, k))
+                out.append(f'<text x="{_fmtnum(ox + (pl.x + 0.06) * k)}" y="{_fmtnum(oy + pl.y * k + fs + 2)}" font-size="{max(fs - 3, 7)}" font-weight="bold" fill="#111">{_esc(label)}</text>\n')
+            else:
+                out.append(f'<text x="{_fmtnum(cx)}" y="{_fmtnum(cy + (fs / 3 if px_h < 44 else -1))}" font-size="{fs}" font-weight="bold" fill="#111" text-anchor="middle">{_esc(label)}</text>\n')
+                if px_h >= 44 and px_w >= 60:
+                    dims = f"{_fmtnum(U.from_base(part.width, du))} x {_fmtnum(U.from_base(part.height, du))}"
+                    out.append(f'<text x="{_fmtnum(cx)}" y="{_fmtnum(cy + 12)}" font-size="9" fill="#222" text-anchor="middle">{_esc(dims)}</text>\n')
             out.append('</g>\n')
         if sheet.deferred:
             out.append(f'<rect x="{_fmtnum(ox)}" y="{_fmtnum(oy)}" width="{_fmtnum(sheet_px_w)}" height="{_fmtnum(sheet_px_h)}" fill="url(#deferredHatch)" pointer-events="none"/>\n')
@@ -265,8 +297,12 @@ def render_cut_svg(layout: Layout, sheet: Sheet, filename: str) -> str:
     out = ['<?xml version="1.0" encoding="UTF-8"?>\n']
     out.append(f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" '
                f'width="{_fmtnum(W)}{svg_unit}" height="{_fmtnum(H)}{svg_unit}" viewBox="0 0 {_fmtnum(W)} {_fmtnum(H)}">\n')
+    lr = layout.label_report
+    label_note = " No labels."
+    if lr is not None and lr.enabled and not lr.render_only:
+        label_note = f" Piece labels on the ENGRAVE layer: {lr.font} font, cap height {lr.effective_height:.3f} in ({'fill/raster' if lr.font == 'outline' else 'line/score'})."
     out.append(_metadata_comment(filename, job.version, job.author,
-               f"Cut-ready {sheet.label} for job '{job.name}': 1 user unit = 1 {svg_unit}, hairline strokes, no labels."
+               f"Cut-ready {sheet.label} for job '{job.name}': 1 user unit = 1 {svg_unit}, hairline strokes." + label_note
                + (" DEFERRED sheet." if sheet.deferred else "")))
     out.append(f'<g id="CUT" inkscape:groupmode="layer" inkscape:label="CUT" fill="none" stroke="#ff0000" stroke-width="0.001">\n')
     for pl in sheet.placements:
@@ -278,6 +314,9 @@ def render_cut_svg(layout: Layout, sheet: Sheet, filename: str) -> str:
     for pl in sheet.placements:
         for i, g in enumerate(pl.engrave):
             out.append(f'<path id="engrave-{_esc(pl.key)}-{i}" d="{geometry_path(g, 0.0, 0.0, kk)}"/>\n')
+            n_eng += 1
+        if pl.label is not None and not pl.label.render_only:
+            out.append(f'<g id="label-{_esc(pl.key)}">\n' + label_geometry_svg(pl.label, 0.0, 0.0, kk, cut_file=True) + '</g>\n')
             n_eng += 1
     if job.engrave_layer == "outline-guide":
         for pl in sheet.placements:
@@ -329,6 +368,12 @@ def write_cut_dxf(layout: Layout, sheet: Sheet, path: str) -> Optional[str]:
             add_ring(hole.coords[:-1], "CUT")
         for g in pl.engrave:
             add_geom(g, "ENGRAVE")
+        if pl.label is not None and not pl.label.render_only:
+            layer = job.labels.dxf_layer or "ENGRAVE"
+            if layer not in doc.layers:
+                doc.layers.add(layer, color=5)
+            for g in pl.label.geoms:
+                add_geom(g, layer)
         if job.engrave_layer == "outline-guide" and job.part_by_id(pl.part_id).engrave:
             add_ring(pl.polygon.exterior.coords[:-1], "ENGRAVE")
     doc.saveas(path)
@@ -386,3 +431,4 @@ def render_parts_echo_svg(job: Job, filename: str) -> str:
 # v1.2 (2026-09-04): with_table placement table for printed pages.
 # v1.3 (2026-09-04): Engrave geometry on the ENGRAVE layer (SVG/DXF) and in the reference/echo renders.
 # v1.4 (2026-09-04): Per-sheet sizes (multiple stock sizes).
+# v1.5 (2026-09-05): Piece labels in cut files (ENGRAVE) and the reference render; shared reference_label_text.

@@ -1,6 +1,6 @@
 """
 file: pipeline.py
-version: 1.2
+version: 1.3
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass, field
 
 from .layout import Layout, build_layout
-from .model import Job
+from .model import Job, OUTPUT_KINDS
 from .render import render_reference_svg, render_cut_svg, write_cut_dxf, render_parts_echo_svg
 from .report import cut_list_md, validation_md, validation_json, layout_json
 from .verify import Report, verify
@@ -90,24 +90,30 @@ def build_job(job: Job, out_dir: str, dxf: bool = True, determinism: bool = True
         outputs.append(name)
 
     layout = build_layout(job)
+    want = set(job.outputs) if job.outputs is not None else set(OUTPUT_KINDS)
+    dxf = dxf and "dxf" in want
+    pdf = pdf and "pdf" in want
     ref_text = None
     sheet_svgs: dict[int, str] = {}
     if layout.placements:
         ref_name = f"{base}_reference_v{V}.svg"
-        ref_text = render_reference_svg(layout, ref_name)
-        write(ref_name, ref_text)
+        ref_text = render_reference_svg(layout, ref_name)  # always rendered: the verifier re-measures it
+        if "reference" in want:
+            write(ref_name, ref_text)
         for s in layout.sheets:
             tag = f"sheet{s.index + 1:02d}" + ("_deferred" if s.deferred else "")
-            cut_name = f"{base}_{tag}_cut_v{V}.svg"
-            write(cut_name, render_cut_svg(layout, s, cut_name))
+            if "svg" in want:
+                cut_name = f"{base}_{tag}_cut_v{V}.svg"
+                write(cut_name, render_cut_svg(layout, s, cut_name))
             if dxf:
                 dxf_name = f"{base}_{tag}_cut_v{V}.dxf"
                 if write_cut_dxf(layout, s, os.path.join(out_dir, dxf_name)):
                     outputs.append(dxf_name)
-            # Per-sheet reference pages (PRD v1.x "split files"): always written so one sheet can be handed off alone.
+            # Per-sheet reference pages (PRD v1.x "split files"): written with the reference so one sheet can be handed off alone.
             sheet_ref_name = f"{base}_{tag}_reference_v{V}.svg"
             sheet_svgs[s.index] = render_reference_svg(layout, sheet_ref_name, only_sheets=[s.index], with_table=True)
-            write(sheet_ref_name, sheet_svgs[s.index])
+            if "reference" in want:
+                write(sheet_ref_name, sheet_svgs[s.index])
         if pdf and sheet_svgs:
             pdf_name = f"{base}_cut_sheet_v{V}.pdf"
             written = write_pdf(sheet_svgs, os.path.join(out_dir, pdf_name))
@@ -134,3 +140,4 @@ def build_job(job: Job, out_dir: str, dxf: bool = True, determinism: bool = True
 # v1.0 (2026-09-04): Initial release (extracted from cut_sheet_builder.py cmd_build).
 # v1.1 (2026-09-04): PDF cut sheet export (cairosvg + pypdf).
 # v1.2 (2026-09-04): Per-sheet reference SVG files always written.
+# v1.3 (2026-09-05): job.outputs selects which files are written.
