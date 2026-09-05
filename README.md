@@ -74,14 +74,14 @@ outline) or beside the cutout (in the waste). Text size follows the machine (`ma
 laser raster, single-line strokes for routers. Labels that cannot fit fall back and the
 validation report lists every one. Machine profiles in `cut-sheet-builder/assets/profiles/`
 hold shop defaults; reference one with `"profile": "router_1_8"`. Details:
-`cut-sheet-builder/references/job_schema_v1.4.md` and `docs/piece_labeling_prd_v1.1.md`.
+`cut-sheet-builder/references/job_schema_v1.4.md` and `docs/piece_labeling_prd_v1.2.md`.
 
 ## Engines
 
 Bounding-box packing uses `rectpack` when importable, otherwise a bundled MaxRects or
 guillotine packer. True-outline nesting uses `pynest2d` when importable, otherwise a bundled
 shapely greedy nester. The validation report always says which one ran. See
-`cut-sheet-builder/references/engine_notes_v1.2.md`.
+`cut-sheet-builder/references/engine_notes_v1.3.md`.
 
 ## CHANGELOG
 - v1.0 (2026-09-04): Initial release.
