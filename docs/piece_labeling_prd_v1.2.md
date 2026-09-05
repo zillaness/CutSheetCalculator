@@ -1,14 +1,14 @@
 ---
-file: piece_labeling_prd_v1.1.md
-version: 1.1
+file: piece_labeling_prd_v1.2.md
+version: 1.2
 author: Sam Cao
 created: 2026-09-05
 last_updated: 2026-09-05
-description: PRD for piece labeling in cut-sheet-builder cut-ready files. Marks each piece with its id so identical parts can be told apart at assembly, with font and text size derived from a savable machine profile, output formats chosen separately from the machine, on-piece and beside-cutout placement, spacing coupling, explicit fallbacks, and validation. Revised after Sam's review of v1.0; awaiting go.
+description: PRD for piece labeling in cut-sheet-builder cut-ready files. Marks each piece with its id so identical parts can be told apart at assembly, with font and text size derived from a savable machine profile, output formats chosen separately from the machine, on-piece and beside-cutout placement, spacing coupling, explicit fallbacks, and validation. Signed off 2026-09-05; built in cut-sheet-builder v1.4.
 ai_update: Update last_updated and version. Rename file to match. Append changelog at bottom.
 ---
 
-# Piece labeling for assembly (cut-sheet-builder) — PRD v1.1, revised for sign-off
+# Piece labeling for assembly (cut-sheet-builder) — PRD v1.2, signed off and built
 
 ## 1. Problem
 
@@ -439,17 +439,17 @@ Resolved in Sam's v1.0 review (2026-09-05):
 6. Default label text is the id; per-part text override to edit what goes on a piece.
 7. Show-face and down-face marking deferred to v1.x with the outward-facing-face idea.
 
-Still open before go:
+Closed at go (2026-09-05): labels are opt-in (`labels.mode` defaults to `none`; use them only
+when parts are similar enough to confuse and a mark is acceptable); fallback chain as stated;
+outline font is a subset of Liberation Sans renamed Label Sans (SIL OFL); starter profiles
+`laser_24x18_raster`, `router_1_8`, `hand` shipped with placeholder numbers marked as such.
 
-- Confirm decision 4 reads as intended: when a beside-cutout label has no room, the engine
-  tries putting it on the piece; when that fails too, the piece gets no label and the
-  report says which piece and why. `fallback: drop` skips the on-piece attempt.
-- Bundled outline font: proposed Liberation Sans (SIL OFL), subset to the label characters.
-  Any preference (a font the shop already uses on the laser) changes nothing but the file.
-- Shipped profiles to start with: `laser_24x18_raster`, `router_1_8`, `hand`. Names and
-  numbers to be filled from the actual shop machines before v1 ships; placeholders until
-  then, marked as such in the file.
+Built as specified with one refinement found in testing: the beside-cutout corridor is text
+height + 2 pads + kerf (the cut eats kerf/2 into the waste on each side), and the clearance
+check grows the label box by pad + kerf/2 against raw outlines. Section 7.5's formula is
+superseded by that.
 
 ## CHANGELOG
 - v1.0 (2026-09-05): Initial draft for sign-off.
 - v1.1 (2026-09-05): After Sam's review. Outline font for laser raster added to v1 beside single-line for routers; machine and outputs decoupled with an `outputs` job field; savable machine profiles; per-part label text; hand jobs label the reference/PDF only; G-code and 3D output named as out of scope; show_face and ENGRAVE_BACK deferred to v1.x; acceptance tests 7-9 added.
+- v1.2 (2026-09-05): Signed off. Decisions closed; corridor formula corrected to include the kerf; marked as built.

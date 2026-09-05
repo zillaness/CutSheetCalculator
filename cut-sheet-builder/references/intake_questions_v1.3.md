@@ -1,6 +1,6 @@
 ---
 file: intake_questions_v1.0.md
-version: 1.2
+version: 1.3
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -16,6 +16,9 @@ are never defaulted: sheet size and cutting method.
 
 ## Always asked
 
+0. **Profile.** Is there a saved machine profile for this job (shipped: `laser_24x18_raster`,
+   `router_1_8`, `hand`; or one in the job's `profiles/` folder)? Applying one answers most of
+   the questions below; confirm anything the job changes.
 1. **Parts.** Typed dimensions (w x h, qty) or files (DXF/SVG) with quantities. For files:
    what unit the file is in if it is not embedded, and which outline if a file holds several.
 2. **Sheet size.** Offer presets: 24 x 18 laser, 4 x 8 plywood (96 x 48), 4 x 4 half sheet,
@@ -23,6 +26,10 @@ are never defaulted: sheet size and cutting method.
    they go ahead of the main sheet in `sheets`, which fills them before opening full sheets.
 3. **Cutting method.** `free` (laser, CNC, jigsaw: any path) or `guillotine` (table saw,
    panel saw: full edge-to-edge cuts only). No default.
+3a. **Machine.** laser, CNC router, plasma, waterjet, or hand tools. Asked every job; it sets
+   label sizing and the rotation-step guidance. Routers: the marking tool diameter.
+3b. **Outputs.** Which files: reference SVG, cut SVG, cut DXF, PDF. A router job usually wants
+   DXF for CAM; a laser SVG; hand cutting the PDF. Not inferred from the machine.
 4. **Kerf.** Typical: 0.125 in table saw blade, 0.008 to 0.012 in laser on plywood/acrylic.
 5. **Outer edge margin.** Sheet edge to nearest part. Typical 0.25 in laser, 0.5 in plywood
    with damaged edges.
@@ -49,7 +56,12 @@ are never defaulted: sheet size and cutting method.
 10. **Groups and sequencing.** Any parts to isolate onto their own sheets or cut later?
 11. **Rods/bars.** Piece length, quantity, stock bar length (or "just tell me the total").
 12. **Units for display.** in/ft or mm/cm. Internal math is always inches.
-13. **Output version and author** if not 1.0 / Sam Cao.
+13. **Piece labels.** Only when parts are similar enough to confuse at assembly and a mark on
+    the part is acceptable. Mode (`on-piece`, `beside-cutout`, or none), font if not the
+    machine default, cap height if larger than the default, any part that should not be
+    labeled or should carry different text. Plasma and waterjet cannot label; hand jobs get
+    labels on the PDF only.
+14. **Output version and author** if not 1.0 / Sam Cao.
 
 ## Style/phrasing assumptions (do not ask)
 
@@ -61,3 +73,4 @@ are never defaulted: sheet size and cutting method.
 - v1.0 (2026-09-04): Initial release.
 - v1.1 (2026-09-04): Rotation step guidance by cutting tool; free mode; per-part override.
 - v1.2 (2026-09-04): Offcuts question.
+- v1.3 (2026-09-05): Profile, machine, outputs, and piece label questions.

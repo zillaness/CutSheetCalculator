@@ -1,6 +1,6 @@
 """
 file: test_web_page.py
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -120,6 +120,30 @@ def test_example_echo_and_build_flow(page):
     assert page.evaluate("document.querySelectorAll('#print-pages .page').length") == 3
 
 
+def test_profile_and_label_controls_build_a_labeled_job(page):
+    page.reload()
+    page.wait_for_function("document.querySelector('#status').textContent.includes('Engine')")
+    page.select_option("#profile", "router_1_8")
+    page.click("#apply-profile")
+    assert page.input_value("#machine") == "router" and page.input_value("#tool-dia") == "0.125"
+    page.click("#add-rect")
+    page.fill("#parts tbody tr:last-child .w", "30")
+    page.fill("#parts tbody tr:last-child .h", "11.25")
+    page.fill("#parts tbody tr:last-child .ltext", "SHELF-L")
+    page.select_option("#label-mode", "beside-cutout")
+    page.check("input[name=cutting][value=free]")
+    job = json.loads(page.evaluate("JSON.stringify(window.CSB.collectJob())"))["job"]
+    assert job["machine"] == "router" and job["marking_tool_diameter"] == 0.125
+    assert job["labels"]["mode"] == "beside-cutout" and job["labels"]["font"] == "single-line"
+    assert job["parts"][0]["label"]["text"] == "SHELF-L"
+    assert job["outputs"] == ["reference", "dxf", "pdf"]
+    # labels on without a machine is refused by the form
+    page.select_option("#machine", "")
+    page.evaluate("document.querySelector('#run-status').textContent=''")
+    page.click("#btn-build")
+    page.wait_for_function("document.querySelector('#run-status').textContent.includes('pick the machine')")
+
+
 def test_trophy_example_populates_rods_and_deferred(page):
     page.reload()
     page.wait_for_function("document.querySelector('#status').textContent.includes('Engine')")
@@ -150,4 +174,5 @@ def test_offcut_rows_become_sheets_list(page):
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): Fall back to Playwright's own Chromium (CI).
+# v1.2 (2026-09-05): Profile and label control test.
 # v1.1 (2026-09-04): Offcut rows test.

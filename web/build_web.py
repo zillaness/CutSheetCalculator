@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 file: build_web.py
-version: 1.2
+version: 1.3
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -25,6 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ENGINE = os.path.join(ROOT, "cut-sheet-builder", "scripts", "cutsheet")
 EXAMPLES = os.path.join(ROOT, "cut-sheet-builder", "assets", "examples")
+PROFILES = os.path.join(ROOT, "cut-sheet-builder", "assets", "profiles")
 
 
 def engine_zip_b64() -> str:
@@ -54,7 +55,14 @@ def build(date: str | None = None) -> str:
         lb = base64.b64encode(fh.read()).decode()
     with open(os.path.join(EXAMPLES, "trophy_job_v1.0.json"), encoding="utf-8") as fh:
         trophy = {k: v for k, v in json.load(fh).items() if not k.startswith("_")}
+    profiles = {}
+    for name in sorted(os.listdir(PROFILES)):
+        if name.endswith(".json"):
+            with open(os.path.join(PROFILES, name), encoding="utf-8") as fh:
+                data = json.load(fh)
+            profiles[name[:-5]] = {k: v for k, v in data.items() if not k.startswith("_")}
     html = (html.replace("__PYODIDE_VERSION__", PYODIDE_VERSION)
+                .replace("__SHIPPED_PROFILES__", json.dumps(profiles))
                 .replace("__ENGINE_ZIP_B64__", engine_zip_b64())
                 .replace("__EXAMPLE_LBRACKET_SVG_B64__", lb)
                 .replace("__EXAMPLE_TROPHY_JOB__", json.dumps(trophy))
@@ -80,3 +88,4 @@ if __name__ == "__main__":
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): Pyodide 0.27.7.
 # v1.2 (2026-09-05): Engine zip includes subpackages and font files.
+# v1.3 (2026-09-05): Shipped profiles embedded.

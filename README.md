@@ -1,6 +1,6 @@
 ---
 file: README.md
-version: 1.2
+version: 1.3
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -66,6 +66,16 @@ python -m pytest -q tests
 `build` writes the reference SVG, per-sheet cut-ready SVG and DXF, cut list, layout JSON,
 and validation report, and exits non-zero if any check fails.
 
+## Piece labels and profiles
+
+Turn on `labels` in a job to mark each piece with its id: on the piece (engraved inside the
+outline) or beside the cutout (in the waste). Text size follows the machine (`machine` plus
+`marking_tool_diameter` for routers) and the font follows it too: filled outline glyphs for
+laser raster, single-line strokes for routers. Labels that cannot fit fall back and the
+validation report lists every one. Machine profiles in `cut-sheet-builder/assets/profiles/`
+hold shop defaults; reference one with `"profile": "router_1_8"`. Details:
+`cut-sheet-builder/references/job_schema_v1.4.md` and `docs/piece_labeling_prd_v1.1.md`.
+
 ## Engines
 
 Bounding-box packing uses `rectpack` when importable, otherwise a bundled MaxRects or
@@ -78,3 +88,4 @@ shapely greedy nester. The validation report always says which one ran. See
 - v1.0.1 (2026-09-04): Reference link bump.
 - v1.1 (2026-09-04): Static web page section.
 - v1.2 (2026-09-04): GitHub Pages deployment section.
+- v1.3 (2026-09-05): Piece labels and profiles section.

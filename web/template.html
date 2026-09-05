@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   file: index.html (built from template.html by build_web.py; do not edit index.html by hand)
-  version: 1.2
+  version: 1.3
   author: Sam Cao
   created: 2026-09-04
   last_updated: __BUILD_DATE__
@@ -73,7 +73,7 @@
 <section id="parts-section">
   <h2>Parts</h2>
   <table id="parts">
-    <thead><tr><th>ID</th><th>Source</th><th>File units</th><th>Qty</th><th>Rotation</th><th>Step</th><th>Engrave</th><th>Group</th><th></th></tr></thead>
+    <thead><tr><th>ID</th><th>Source</th><th>File units</th><th>Qty</th><th>Rotation</th><th>Step</th><th>Engrave</th><th>Group</th><th>Label</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
   <div class="actions" style="margin-top:10px">
@@ -89,6 +89,13 @@
 
 <section id="options-section">
   <h2>Options</h2>
+  <div class="row">
+    <label class="field">Machine profile<select id="profile"><option value="">(none)</option></select></label>
+    <button id="apply-profile" type="button">Apply profile</button>
+    <button id="save-profile" type="button">Save form as profile</button>
+    <button id="export-profile" type="button">Export profile JSON</button>
+    <span class="hint">Profiles hold machine, tool, kerf, margin, spacing, rotation, label defaults, and outputs. Saved ones live in this browser; export to keep one in the repo's profiles folder.</span>
+  </div>
   <div class="row">
     <label class="field">Job name<input id="job-name" type="text" value="job"></label>
     <label class="field">Version<input id="job-version" type="text" class="short" value="1.0"></label>
@@ -112,6 +119,27 @@
       <option value="shared-edge">shared-edge (zero gap)</option>
       <option value="custom-margin">custom-margin</option></select></label>
     <label class="field">Custom spacing<input id="spacing-value" type="number" step="any" placeholder="value"></label>
+  </div>
+  <div class="row">
+    <label class="field">Machine (asked every job; required when labels are on)<select id="machine">
+      <option value="">(not set)</option><option value="laser">laser</option><option value="router">CNC router</option>
+      <option value="plasma">plasma</option><option value="waterjet">waterjet</option><option value="hand">hand tools / table saw</option></select></label>
+    <label class="field">Marking tool diameter (router)<input id="tool-dia" type="number" step="any" placeholder="e.g. 0.125"></label>
+    <span class="field">Outputs
+      <span><label><input type="checkbox" class="out" value="reference" checked> reference</label>
+      &nbsp;<label><input type="checkbox" class="out" value="svg" checked> cut SVG</label>
+      &nbsp;<label><input type="checkbox" class="out" value="dxf" checked> cut DXF</label>
+      &nbsp;<label><input type="checkbox" class="out" value="pdf" checked> PDF (CLI)</label></span></span>
+  </div>
+  <div class="row">
+    <label class="field">Piece labels<select id="label-mode">
+      <option value="none">none (parts are all the same or obviously different)</option>
+      <option value="on-piece">on-piece (engrave the id inside the part)</option>
+      <option value="beside-cutout">beside-cutout (mark the waste next to the part)</option></select></label>
+    <label class="field">Label font<select id="label-font"><option value="">from machine</option><option value="outline">outline (laser raster)</option><option value="single-line">single-line (router / score)</option></select></label>
+    <label class="field">Label cap height<input id="label-cap" type="number" step="any" placeholder="machine default"></label>
+    <label class="field">Label text<select id="label-text"><option value="id">id</option><option value="id+copy">id + copy number</option></select></label>
+    <label class="field">Auto-raise spacing for beside-cutout<select id="label-auto"><option value="1">on</option><option value="0">off (labels may drop)</option></select></label>
   </div>
   <div class="row">
     <label class="field">Nest mode<select id="nest-mode"><option value="true-outline">true-outline</option><option value="bounding-box">bounding-box</option></select></label>
@@ -170,6 +198,7 @@ const PYODIDE_VERSION = "__PYODIDE_VERSION__";
 const ENGINE_ZIP_B64 = "__ENGINE_ZIP_B64__";
 const EXAMPLE_LBRACKET_SVG_B64 = "__EXAMPLE_LBRACKET_SVG_B64__";
 const EXAMPLE_TROPHY_JOB = __EXAMPLE_TROPHY_JOB__;
+const SHIPPED_PROFILES = __SHIPPED_PROFILES__;
 
 const $ = (s) => document.querySelector(s);
 const status = (msg, err) => { const el = $('#status'); el.textContent = msg; el.className = err ? 'err' : ''; };
@@ -226,6 +255,8 @@ function partRow(p) {
     <td><select class="step"><option value="">job</option><option value="90">90</option><option value="45">45</option><option value="30">30</option><option value="15">15</option><option value="free">free</option></select></td>
     <td><input type="checkbox" class="engrave"></td>
     <td><input type="text" class="short group" placeholder="group"></td>
+    <td><select class="lmode"><option value="">job</option><option value="none">none</option><option value="on-piece">on-piece</option><option value="beside-cutout">beside</option></select>
+        <input type="text" class="short ltext" placeholder="text = id" title="text written on the piece"></td>
     <td><button class="del" title="remove">x</button></td>`;
   if (p.rotation) tr.querySelector('.rot').value = p.rotation;
   if (p.angle != null) tr.querySelector('.angle').value = p.angle;
@@ -305,6 +336,8 @@ function collectJob() {
                 engrave: tr.querySelector('.engrave').checked };
     const g = tr.querySelector('.group').value.trim(); if (g) p.group = g;
     const st = tr.querySelector('.step').value; if (st) p.rotation_step = st === 'free' ? 'free' : parseFloat(st);
+    const lm = tr.querySelector('.lmode').value, lt = tr.querySelector('.ltext').value.trim();
+    if (lm || lt) { p.label = {}; if (lm) p.label.mode = lm; if (lt) p.label.text = lt; }
     if (tr.dataset.kind === 'file') {
       p.source = { type: 'file', path: tr.dataset.file };
       const fu = tr.querySelector('.funits').value; if (fu) p.source.units = fu;
@@ -331,6 +364,19 @@ function collectJob() {
     parts, rods, deferred_groups: deferred, output: { version: $('#job-version').value.trim() || '1.0', author: 'Sam Cao' },
   };
   if (offcuts.length) job.sheets = [...offcuts, sheet]; else job.sheet = sheet;
+  const machine = $('#machine').value; if (machine) job.machine = machine;
+  const tool = parseFloat($('#tool-dia').value); if (tool > 0) job.marking_tool_diameter = tool;
+  const outs = [...document.querySelectorAll('.out:checked')].map(e => e.value);
+  if (outs.length && outs.length < 4) job.outputs = outs;
+  const lmode = $('#label-mode').value;
+  const labels = { mode: lmode, text: $('#label-text').value, auto_spacing: $('#label-auto').value === '1' };
+  if ($('#label-font').value) labels.font = $('#label-font').value;
+  const cap = parseFloat($('#label-cap').value); if (cap > 0) labels.cap_height = cap;
+  const anyPartLabel = parts.some(p => p.label && p.label.mode && p.label.mode !== 'none');
+  if (lmode !== 'none' || anyPartLabel || labels.font || cap > 0) job.labels = labels;
+  if ((lmode !== 'none' || anyPartLabel) && !machine) throw new Error('Piece labels are on, so pick the machine (it sets the legible text size). Plasma and waterjet cannot label.');
+  if ((lmode !== 'none' || anyPartLabel) && machine === 'router' && !(tool > 0)) throw new Error('A router needs the marking tool diameter to size labels.');
+  const profileName = $('#profile').value; if (profileName && !SHIPPED_PROFILES[profileName] === false) {}
   const files = {};
   for (const p of parts) if (p.source) { if (!uploads[p.source.path]) throw new Error('Missing upload for ' + p.source.path); files[p.source.path] = uploads[p.source.path]; }
   return { job, files, determinism: $('#determinism').value === '1' };
@@ -378,6 +424,11 @@ function renderResults(res) {
   for (const r of s.rods) sum += ` Rod ${esc(r.id)}: ${esc(r.continuous)} continuous` + (r.bars ? `, ${r.bars} bar(s) of ${esc(r.stock)}` : '') + '.';
   sum += '</p><p class="hint">Engine: ' + esc(Object.entries(s.engines).map(([m, e]) => m + ': ' + e).join('; ')) + '</p>';
   for (const f of s.fallbacks) sum += `<p class="flag">Fallback: ${esc(f)}</p>`;
+  if (s.labels && s.labels.enabled) {
+    sum += `<p>Labels: ${esc(Object.entries(s.labels.counts).map(([k, v]) => k + ' ' + v).join(', '))}; font ${esc(s.labels.font)}, cap height ${(+s.labels.effective_height).toFixed(3)} in (minimum ${(+s.labels.min_height).toFixed(3)}: ${esc(s.labels.basis)}).`
+      + (s.labels.spacing_bump ? ` Part spacing raised ${(+s.labels.spacing_bump[0]).toFixed(3)} -> ${(+s.labels.spacing_bump[1]).toFixed(3)} in for beside-cutout labels.` : '') + '</p>';
+    for (const e of s.labels.events) sum += `<p class="flag">Label ${esc(e.key)}: ${esc(e.requested)} -> ${esc(e.result)} (${esc(e.reason)})</p>`;
+  }
   $('#summary').innerHTML = sum;
   $('#checks').innerHTML = '<tbody>' + res.checks.map(c => `<tr><td class="${c.passed ? (c.flagged ? 'flag' : 'pass') : 'fail'}">${c.passed ? (c.flagged ? 'PASS*' : 'PASS') : 'FAIL'}</td><td>${esc(c.name)}</td><td class="hint">${esc(c.detail)}</td></tr>`).join('') + '</tbody>';
   const dl = $('#downloads'); dl.innerHTML = '';
@@ -417,6 +468,54 @@ $('#btn-print').onclick = () => {
   if (val) { const d = document.createElement('div'); d.className = 'page'; d.innerHTML = mdToHtml(val[1]); pp.appendChild(d); }
   window.print();
 };
+// ---------------- profiles ----------------
+function loadSavedProfiles() { try { return JSON.parse(localStorage.getItem('csb_profiles') || '{}'); } catch (e) { return {}; } }
+function allProfiles() { return { ...SHIPPED_PROFILES, ...loadSavedProfiles() }; }
+function refreshProfileList(selected) {
+  const sel = $('#profile'); const cur = selected ?? sel.value; sel.innerHTML = '<option value="">(none)</option>';
+  const saved = loadSavedProfiles();
+  for (const name of Object.keys(allProfiles()).sort()) { const o = document.createElement('option'); o.value = name; o.textContent = name + (saved[name] ? ' (saved here)' : ''); sel.appendChild(o); }
+  sel.value = cur || '';
+}
+function applyProfile(pr) {
+  if (!pr) return;
+  if (pr.machine) $('#machine').value = pr.machine;
+  if (pr.marking_tool_diameter != null) $('#tool-dia').value = pr.marking_tool_diameter;
+  if (pr.kerf != null) $('#kerf').value = pr.kerf;
+  if (pr.outer_edge_margin != null) $('#margin').value = pr.outer_edge_margin;
+  if (pr.part_spacing) { $('#spacing').value = pr.part_spacing.mode || 'kerf-gap'; $('#spacing').onchange(); if (pr.part_spacing.value != null) $('#spacing-value').value = pr.part_spacing.value; }
+  if (pr.cutting_method) { const r = document.querySelector(`input[name=cutting][value=${pr.cutting_method}]`); if (r) r.checked = true; }
+  if (pr.nest_mode) $('#nest-mode').value = pr.nest_mode;
+  if (pr.rotation_step != null) $('#rotation-step').value = String(pr.rotation_step);
+  if (typeof pr.sheet === 'string') { $('#sheet-preset').value = pr.sheet; $('#sheet-preset').onchange(); }
+  else if (pr.sheet && pr.sheet.width) { $('#sheet-preset').value = 'custom'; $('#sheet-preset').onchange(); $('#sheet-w').value = pr.sheet.width; $('#sheet-h').value = pr.sheet.height; }
+  if (pr.labels) { if (pr.labels.mode) $('#label-mode').value = pr.labels.mode; $('#label-font').value = pr.labels.font || ''; if (pr.labels.cap_height != null) $('#label-cap').value = pr.labels.cap_height; if (pr.labels.text) $('#label-text').value = pr.labels.text; if (pr.labels.auto_spacing != null) $('#label-auto').value = pr.labels.auto_spacing ? '1' : '0'; }
+  if (pr.outputs) for (const e of document.querySelectorAll('.out')) e.checked = pr.outputs.includes(e.value);
+}
+function formAsProfile(name) {
+  const req = (() => { try { return collectJob(); } catch (e) { return null; } })();
+  const j = req ? req.job : {};
+  const pr = { name, machine: $('#machine').value || undefined, marking_tool_diameter: parseFloat($('#tool-dia').value) || undefined,
+    sheet: j.sheet || j.sheets?.at(-1), kerf: parseFloat($('#kerf').value), outer_edge_margin: parseFloat($('#margin').value),
+    part_spacing: j.part_spacing || { mode: $('#spacing').value }, cutting_method: j.cutting_method, nest_mode: $('#nest-mode').value,
+    rotation_step: $('#rotation-step').value === 'free' ? 'free' : parseFloat($('#rotation-step').value),
+    labels: j.labels || { mode: $('#label-mode').value }, outputs: [...document.querySelectorAll('.out:checked')].map(e => e.value) };
+  for (const k of Object.keys(pr)) if (pr[k] === undefined || (typeof pr[k] === 'number' && isNaN(pr[k]))) delete pr[k];
+  return pr;
+}
+$('#apply-profile').onclick = () => { applyProfile(allProfiles()[$('#profile').value]); $('#run-status').textContent = $('#profile').value ? `Applied profile ${$('#profile').value}.` : ''; };
+$('#save-profile').onclick = () => {
+  const name = prompt('Profile name (letters, digits, _ -):', $('#profile').value || 'my_machine'); if (!name) return;
+  const clean = name.replace(/[^A-Za-z0-9_-]/g, '_'); const saved = loadSavedProfiles(); saved[clean] = formAsProfile(clean);
+  try { localStorage.setItem('csb_profiles', JSON.stringify(saved)); } catch (e) { $('#run-status').textContent = 'Could not save in this browser: ' + e.message; return; }
+  refreshProfileList(clean); $('#run-status').textContent = `Saved profile ${clean} in this browser.`;
+};
+$('#export-profile').onclick = () => {
+  const name = $('#profile').value || 'my_machine'; const pr = allProfiles()[name] || formAsProfile(name);
+  const doc = { _metadata: { file: name + '.json', version: '1.0', author: 'Sam Cao', created: new Date().toISOString().slice(0, 10), last_updated: new Date().toISOString().slice(0, 10), description: 'Machine profile exported from the cut sheet builder page.', ai_update: 'Update last_updated and version. Append to _changelog array.' }, _changelog: [{ version: '1.0', date: new Date().toISOString().slice(0, 10), note: 'Exported from the page.' }], ...pr, name };
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' })); a.download = name + '.json'; document.body.appendChild(a); a.click(); a.remove();
+};
+refreshProfileList('');
 $('#btn-echo').onclick = runEcho;
 $('#btn-build').onclick = runBuild;
 $('#sheet-preset').onchange = () => { const c = $('#sheet-preset').value === 'custom'; $('#sheet-w').disabled = !c; $('#sheet-h').disabled = !c; };
@@ -431,6 +530,7 @@ loadEngine();
   v1.0 (2026-09-04): Initial release.
   v1.1 (2026-09-04): Offcut / extra sheet size rows (multiple stock sizes).
   v1.2 (2026-09-04): Favicon, description, noscript notice for GitHub Pages.
+  v1.3 (2026-09-05): Machine profiles (apply/save/export), machine, tool diameter, outputs, piece label controls, per-part label mode and text.
 -->
 </body>
 </html>

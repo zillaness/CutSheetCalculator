@@ -12,7 +12,7 @@ description: >
   plywood", or any request to figure out where parts go on a sheet or how much material
   to buy, even if the word "nest" never appears.
 metadata:
-  version: "1.3"
+  version: "1.4"
   author: Samuel Cao
   created: "2026-09-04"
   last_updated: "2026-09-04"
@@ -54,7 +54,7 @@ interview -> job JSON -> echo (confirm parts) -> build (nest + render + verify) 
 - Python: `shapely` (required), `ezdxf` (DXF in/out), `svgelements` (SVG in)
 - Optional engines: `rectpack` (bounding-box), `pynest2d` (true-outline). When either is
   missing the bundled engine runs and the validation report flags it. Check with
-  `python scripts/cut_sheet_builder.py deps`. See `references/engine_notes_v1.2.md` before
+  `python scripts/cut_sheet_builder.py deps`. See `references/engine_notes_v1.3.md` before
   promising packing density.
 
 ```bash
@@ -76,9 +76,9 @@ CSB="python3 $SKILL_DIR/scripts/cut_sheet_builder.py"
 |---|---|
 | CLI (echo, build, deps, presets) | `scripts/cut_sheet_builder.py` |
 | Engine package | `scripts/cutsheet/` |
-| Job file schema | `references/job_schema_v1.3.md` |
-| Intake question set | `references/intake_questions_v1.2.md` |
-| Engine and fallback notes | `references/engine_notes_v1.2.md` |
+| Job file schema | `references/job_schema_v1.4.md` |
+| Intake question set | `references/intake_questions_v1.3.md` |
+| Engine and fallback notes | `references/engine_notes_v1.3.md` |
 | Trophy regression job | `assets/examples/trophy_job_v1.0.json` |
 | Irregular-outline job + SVG | `assets/examples/l_bracket_job_v1.0.json`, `l_bracket_v1.0.svg` |
 
@@ -88,7 +88,7 @@ CSB="python3 $SKILL_DIR/scripts/cut_sheet_builder.py"
 
 ### 1. Interview (always)
 
-Run `user-input-protocol` with the question set in `references/intake_questions_v1.2.md`.
+Run `user-input-protocol` with the question set in `references/intake_questions_v1.3.md`.
 Ask in that order. `cutting_method` and sheet size are never defaulted; everything else has
 a sensible default the file names, but confirm anything that changes material use (kerf,
 margin, spacing mode, rotation policy for engraved or grained parts).
@@ -98,7 +98,7 @@ conversation first and ask only the gaps.
 
 ### 2. Write the job JSON
 
-Write `<job>_job_v1.0.json` following `references/job_schema_v1.3.md`. Keep imported
+Write `<job>_job_v1.0.json` following `references/job_schema_v1.4.md`. Keep imported
 outline files next to it (relative `source.path`). Units: set `units.input` to whatever
 the user typed in; the engine stores inches internally and converts back for display.
 
@@ -176,6 +176,16 @@ bounding-box corner. The DXF flips to y-up internally so it overlays the SVG cor
 - **Stock.** `sheet` for one size, or `sheets` in the order to use them (offcuts with a
   quantity first, the unlimited full sheet last). Each sheet in the output carries its own
   size; the validation report checks quantities were not exceeded.
+- **Machine, outputs, profiles.** `machine` (laser, router, plasma, waterjet, hand) is asked
+  every job and required when labels are on; routers add `marking_tool_diameter`. `outputs`
+  picks which files are written. A `profile` name loads shop defaults from
+  `assets/profiles/` or a `profiles/` folder beside the job; job fields override.
+- **Piece labels.** Off unless asked (`labels.mode`). `on-piece` engraves the id inside the
+  outline, `beside-cutout` marks the waste next to it. Font follows the machine (laser:
+  filled outline for raster, router: single-line) and text height is derived from the tool.
+  Beside-cutout raises part spacing to fit and says so. Anything that cannot fit falls back
+  beside -> on-piece -> drop, and every downgrade or drop is in the validation report.
+  Plasma and waterjet refuse labels; hand jobs label the PDF only.
 - **Determinism.** Fixed ordering (area desc, id, copy). Same input, same layout, checked.
 
 ---
@@ -195,7 +205,8 @@ guillotine), group isolation and deferral order, determinism, and which engine r
 - Density matters more than convenience (production runs, expensive stock) and the
   bundled outline nester ran: recommend Deepnest for the nest, then bring its result back
   for the cut list if useful. Say this plainly; do not oversell the fallback.
-- Toolpaths, feeds/speeds, laser power, engraving artwork, cost optimization: out of scope.
+- Toolpaths, feeds/speeds, laser power, cost optimization: out of scope. The only artwork
+  this skill generates is piece-id text on the ENGRAVE layer, and only when labels are on.
 - DTF gang sheets: raster artwork, not this skill.
 - Mixed rod+sheet jobs already come out of one run (rods section in the cut list). Multiple
   sheet sizes: list them under `sheets`, offcuts first with quantities, full sheet last.
@@ -224,3 +235,4 @@ guillotine), group isolation and deferral order, determinism, and which engine r
 - v1.1 (2026-09-04): rotation_step gains `free` mode and a per-part override; intake maps cutting tool to rotation step; fixed a sharp-tip kerf-buffer overlap in the bundled nester.
 - v1.2 (2026-09-04): Engrave/score layer detection on import, PDF cut sheet, static web page (web/index.html) sharing the same engine.
 - v1.3 (2026-09-04): Multiple stock sizes (`sheets` list, offcuts first).
+- v1.4 (2026-09-05): Piece labels (piece_labeling PRD v1.1), machine and outputs questions, machine profiles.

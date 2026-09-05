@@ -1,6 +1,6 @@
 ---
 file: engine_notes_v1.0.md
-version: 1.2
+version: 1.3
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -72,6 +72,27 @@ runtime x1.4 to x1.8.
   not overlap (intersection area under 1e-6 in^2). The un-buffered polygon must lie inside
   the sheet minus `outer_edge_margin`.
 
+## Piece labels
+
+Two fonts, one layout function (`cutsheet/fonts`): Hershey Simplex single-line strokes
+(public domain, vendored) and Label Sans outline glyphs (a SIL-OFL subset of Liberation Sans,
+read with fontTools). Labels are always explicit geometry on the ENGRAVE layer, never SVG
+`<text>` or DXF TEXT, so the verifier measures what will engrave.
+
+Minimum cap height: router single-line 5 x tool diameter (outline 8 x, discouraged); laser
+outline 0.12 in, single-line 0.10 in; hand 0.25 in. The requested height is raised to the
+minimum and the report says so.
+
+Placement runs after nesting. On-piece: centroid (or an interior point for an L), try 0 then
+90 degrees, keep the text box inside the outline inset by one tool diameter or kerf, shrink in
+10% steps to the minimum, then fall back. Beside-cutout: strips below, right, above, left of
+the bounding box; the box grown by pad + kerf/2 must miss every raw outline and every other
+label box. Spacing is raised before nesting to text height + 2 pads + kerf when any part uses
+beside-cutout and `auto_spacing` is on, and the echo prints the bump. Fallback chain
+beside-cutout -> on-piece -> drop; every downgrade or drop is an event in the report.
+
+Verified on the trophy and L-bracket jobs: no `labels` field means byte-identical cut files.
+
 ## Determinism
 
 Instances are ordered by bbox area desc, then id, then copy number. No randomness anywhere
@@ -81,3 +102,4 @@ in the bundled engines. The verifier re-runs the job and compares every placemen
 - v1.0 (2026-09-04): Initial release.
 - v1.1 (2026-09-04): Rotation search section: free mode, per-part steps, mitre buffer note.
 - v1.2 (2026-09-04): Top-6 slide, all-rectangle routing, new runtime numbers.
+- v1.3 (2026-09-05): Piece labels section.

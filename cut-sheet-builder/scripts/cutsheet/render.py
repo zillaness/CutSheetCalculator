@@ -154,6 +154,8 @@ def render_reference_svg(layout: Layout, filename: str, only_sheets=None, with_t
     # Header
     engines = "; ".join(f"{m}: {e}" for m, e in layout.engines_used.items())
     spacing = job.part_spacing_mode + (f" ({U.fmt(job.custom_margin, du)})" if job.part_spacing_mode == "custom-margin" else "")
+    if job.spacing_bump:
+        spacing += f" raised to {U.fmt(job.spacing_bump[1], du)} for labels"
     stock_desc = ", ".join(f"{U.fmt(st.width, du)} x {U.fmt(st.height, du)}" + (f" (x{st.quantity})" if st.quantity else "") for st in job.stocks)
     lines = [
         (f"{job.name}  v{job.version}  {TODAY}", 18, "bold"),

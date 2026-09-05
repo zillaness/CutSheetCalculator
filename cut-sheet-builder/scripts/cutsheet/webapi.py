@@ -1,6 +1,6 @@
 """
 file: webapi.py
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -91,7 +91,11 @@ def build(request_json: str) -> str:
                         "count": len(s.placements), "reference_svg": res.sheet_svgs.get(s.index, "")} for s in lay.sheets],
             "summary": {"sheets": len(lay.sheets), "deferred": sum(1 for s in lay.sheets if s.deferred),
                         "utilization": (100 * parts_area / total) if total else 0.0, "rods": rods,
-                        "engines": lay.engines_used, "fallbacks": lay.fallbacks},
+                        "engines": lay.engines_used, "fallbacks": lay.fallbacks,
+                        "labels": ({"enabled": True, "font": lr.font, "effective_height": lr.effective_height, "min_height": lr.min_height,
+                                    "basis": lr.basis, "spacing_bump": lr.spacing_bump, "counts": lr.counts,
+                                    "events": [{"key": e.key, "requested": e.requested, "result": e.result, "reason": e.reason} for e in lr.events]}
+                                   if (lr := lay.label_report) is not None and lr.enabled else {"enabled": False})},
             "files": files,
             "base": slug(job.name),
         })
@@ -104,3 +108,4 @@ def build(request_json: str) -> str:
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): Stock list in summaries; per-sheet sizes.
+# v1.2 (2026-09-05): Label outcomes in the build summary.
