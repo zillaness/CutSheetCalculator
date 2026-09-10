@@ -1,6 +1,6 @@
 ---
 file: material_model_prd_v1.1.md
-version: 1.1
+version: 1.1.1
 author: Sam Cao
 created: 2026-09-10
 last_updated: 2026-09-10
@@ -241,8 +241,10 @@ Implementation is a filter inside `Part.allowed_angles`:
 - `across` keeps 90 and 270.
 - `any` keeps everything, which is today's behavior.
 
-Because 180 is always kept, a grained part still gets the free flip that `rotation: "locked"`
-denies it today. That alone is worth the feature.
+Because 180 is kept, a grained **outline** still gets the end-for-end flip that
+`rotation: "locked"` denies it today. That alone is worth the feature. A typed rectangle is
+only ever offered 0 and 90 in the first place, since flipping a box end for end changes
+nothing, so for rectangles a grain requirement simply picks one of the two.
 
 Interactions, all resolved at load time rather than at pack time:
 
@@ -503,4 +505,5 @@ above; they are recorded here with what changed.
 ## CHANGELOG
 - v1.0 (2026-09-10): Initial draft for sign-off.
 - v1.0.1 (2026-09-10): Mark build item 2 (kerf presets) as built; the rest still awaits sign-off.
+- v1.1.1 (2026-09-10): Correct the 180-flip claim in 7.4: it holds for outlines, and is vacuous for rectangles, which are never offered 180.
 - v1.1 (2026-09-10): Signed off. Segment-based reference-edge addressing replaces bounding-box sides; grain cost reporting on by default with per-part attribution; roll defaults to no grain and errors with a rotation suggestion; banding is rectangles-only in v1; five acceptance tests added.

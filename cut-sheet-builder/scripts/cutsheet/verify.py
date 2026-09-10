@@ -1,6 +1,6 @@
 """
 file: verify.py
-version: 1.3
+version: 1.4
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -316,6 +316,33 @@ def check_engine(layout: Layout, rep: Report):
         rep.add("nesting engine", True, used)
 
 
+def check_materials(layout: Layout, rep: Report):
+    """Prove the grain requirement in the output rather than trusting the packer to have kept it."""
+    job = layout.job
+    for w in job.material_warnings:
+        rep.add("material", True, w, flagged=True)
+
+    grained = {p.id: p for p in job.parts if p.grain != "any"}
+    if not grained:
+        return
+    stock_grain = {sh.stock: None for sh in layout.sheets}
+    for st in job.stocks:
+        stock_grain[st.label] = job.stock_grain(st)
+
+    bad = []
+    for sh in layout.sheets:
+        sg = stock_grain.get(sh.stock) or "none"
+        if sg == "none":
+            continue
+        for pl in sh.placements:
+            part = grained.get(pl.part_id)
+            if part is not None and not part.grain_ok(pl.angle, sg):
+                bad.append(f"{pl.part_id} #{pl.index} on sheet {sh.index + 1} at {pl.angle:g} deg")
+    detail = (f"{len(grained)} part id(s) carry a grain requirement; every placement honors it"
+              if not bad else "grain violated by " + ", ".join(bad[:6]))
+    rep.add("grain direction", not bad, detail)
+
+
 def check_determinism(layout: Layout, rep: Report):
     job = layout.job
     again = build_layout(job)
@@ -333,6 +360,7 @@ def verify(layout: Layout, reference_svg: Optional[str] = None, determinism: boo
     check_rods(layout, rep)
     check_labels(layout, rep)
     check_engine(layout, rep)
+    check_materials(layout, rep)
     if determinism and layout.placements:
         check_determinism(layout, rep)
     return rep
@@ -343,3 +371,4 @@ def verify(layout: Layout, reference_svg: Optional[str] = None, determinism: boo
 # v1.1 (2026-09-04): Engrave-inside-part check.
 # v1.2 (2026-09-04): Per-sheet boundary/area; stock quantity check.
 # v1.3 (2026-09-05): Label checks (height, outcomes, inside-part, clearance, spacing bump).
+# v1.4 (2026-09-10): Grain compliance check and material warnings.

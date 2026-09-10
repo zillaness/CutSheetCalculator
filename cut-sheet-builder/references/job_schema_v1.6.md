@@ -1,6 +1,6 @@
 ---
-file: job_schema_v1.5.md
-version: 1.5
+file: job_schema_v1.6.md
+version: 1.6
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-10
@@ -66,6 +66,44 @@ Every downgrade or drop is listed in the validation report with its reason.
 Per part: `parts[].label` = `{ "mode": "...", "text": "..." }` overrides the job mode or the text
 written on that piece.
 
+## `materials[]`
+
+Optional. A job without it behaves exactly as it did before. Stock entries and parts reference
+a material by `id`.
+
+| Field | Default | Notes |
+|---|---|---|
+| `id` | required | Referenced by `sheets[].material` and `parts[].material` |
+| `kind` | `sheet` | `sheet`, `bar`, or `roll` |
+| `grain` | `none` | `none`, `width`, or `height`: which of the **stock's own** dimensions the grain runs along. A 4x8 sheet is stored 96 x 48, and its face grain runs along `width` |
+| `thickness` | none | Informational in v1 |
+| `banding_thickness` | none | Allowance per banded edge |
+| `default_factory_edges` | `all` | `all`, `none`, or a list of sides, for stock that does not say |
+
+## Naming an edge of a part
+
+Factory-edge and banding requests name edges of the part. **You name the edges; the calculator
+decides which stock edge or corner each one lands on.**
+
+- A typed rectangle answers to `left`, `right`, `top`, `bottom` in its base orientation.
+  Coordinates run x from the left and y from the top, so `top` is the low-y side.
+- An imported outline answers to the **index of a straight run**: `"0"`, `"1"`, and so on.
+  Collinear neighbours merge into one edge, and numbering starts at the vertex nearest the
+  top-left, so it does not shift when an importer reorders the ring. A shape with no top side
+  has nothing honest to call "top", which is why outlines are numbered rather than named.
+
+Naming an edge the part does not have is a load-time error that says how many it does have.
+
+## `sheets[]` material fields
+
+| Field | Default | Notes |
+|---|---|---|
+| `material` | none | Id from `materials` |
+| `factory_edges` | the material default | `all`, `none`, or a list of `left`/`right`/`top`/`bottom`: which of this stock's own sides are known straight. A new sheet has all four; an offcut ripped off one side should say so |
+
+A **factory corner** is not declared separately. It is where two adjacent factory edges meet,
+and at most one part can own a given corner.
+
 ## `parts[]`
 
 | Field | Required | Values | Notes |
@@ -80,6 +118,11 @@ written on that piece.
 | `group` | no | string | For isolation/deferral |
 | `color` | no | CSS color | Reference render only; palette assigned otherwise |
 | `nest_mode` | no | `true-outline` / `bounding-box` | Per-part override |
+| `material` | no | id from `materials` | |
+| `grain` | no | `any` (default), `along`, `across` | The part's grain relative to the stock's. Filters the angles the packer may use |
+| `grain_axis` | no | `width` or `height` | Which of the part's own dimensions carries its grain, in base orientation. Defaults to the **longer side**, since that is what "grain runs the long way" means. A square has no longer side and must say |
+| `reference` | no | edge name, list of names, or `{ "edges": [...], "corner": bool, "required": bool }` | Edges that must land on factory stock. `corner: true` needs exactly two edges that meet. `required: true` makes an unsatisfiable request fail instead of downgrade |
+| `banded_edges` | no | list of edge names | Edges carrying banding. Rectangles only in v1 |
 | `rotation_step` | no | degrees or `"free"` | Per-part override of the job's step. Use it to keep one hand-cut part on 90s while the rest nest freely |
 
 Typed rectangles rotate only 0/90 in every mode.
@@ -96,6 +139,25 @@ Typed rectangles rotate only 0/90 in every mode.
 | `kerf` | no | Overrides the job kerf for this rod outright |
 
 Rod math: `n * length + (n - 1) * kerf`. Bars packed first-fit-decreasing.
+
+## Grain
+
+`grain` is a rotation constraint, not an engineering claim. `along` keeps the angles where the
+part's grain axis lines up with the stock's; `across` keeps the ones where it crosses. A tilted
+angle can never satisfy either, so grained parts do not free-rotate.
+
+For an outline, `along` leaves both 0 and 180, so the part keeps the end-for-end flip that
+`rotation: "locked"` would deny it. A typed rectangle is only ever offered 0 and 90 to begin
+with, since flipping a box end for end changes nothing.
+
+Refused at load time, not at the saw: a square with no `grain_axis`, a `rotation: "locked"`
+angle that fights the grain, and a `rotation_step` whose grid contains no compliant angle. A
+grain requirement on a job whose stock declares no grain is a warning in the validation report,
+not an error.
+
+The `nest2d` engine applies one rotation list to the whole job and cannot express a per-part
+angle set, so it is **not eligible** for grained jobs; the bundled shapely nester runs instead
+and the report says why. Forcing `engine: "nest2d"` on a grained job is an error.
 
 ## Kerf presets
 
@@ -141,4 +203,5 @@ from, and a profile may carry `cut_tool` as a shop default.
 - v1.2 (2026-09-04): engrave layer detection note.
 - v1.3 (2026-09-04): sheets list (multiple stock sizes).
 - v1.4 (2026-09-05): profile, machine, marking_tool_diameter, outputs, labels, parts[].label.
+- v1.6 (2026-09-10): materials block, stock material and factory_edges, part material/grain/grain_axis/reference/banded_edges, segment addressing for part edges.
 - v1.5 (2026-09-10): cut_tool with kerf presets; kerf optional when a tool supplies it; per-rod cut_tool and kerf.

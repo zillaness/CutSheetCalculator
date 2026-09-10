@@ -1,6 +1,6 @@
 ---
 file: intake_questions_v1.0.md
-version: 1.4
+version: 1.5
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-10
@@ -41,6 +41,14 @@ are never defaulted: sheet size and cutting method.
 6. **Part spacing mode.** `kerf-gap` (one kerf between parts; the trophy model),
    `shared-edge` (zero gap, shared cut line; only when the toolpath compensates kerf),
    `custom-margin` (state the value: clearance for heat spread or hand finishing).
+6a. **Material and grain.** Does the stock have a grain direction (plywood, veneer, directional
+   vinyl)? If so, which way does it run on the sheet, and which parts must follow it? Grain is a
+   rotation constraint: it costs packing freedom, so ask which parts genuinely need it rather
+   than applying it to everything. For an imported outline or a square part, ask which of the
+   part's own dimensions carries the grain; for a rectangle the long side is assumed.
+6b. **Factory edges.** Does any part need a known-straight reference edge or a square corner
+   (a mating edge, a face frame, a drawer side)? Name the edges on the part. For offcut stock,
+   ask which sides are still factory and which were sawn.
 7. **Rotation policy per part.** `auto` or `locked` (with the angle). Ask explicitly for
    engraved, grained, or oriented-text parts; do not assume engraved means locked.
 
@@ -80,3 +88,4 @@ are never defaulted: sheet size and cutting method.
 - v1.2 (2026-09-04): Offcuts question.
 - v1.3 (2026-09-05): Profile, machine, outputs, and piece label questions.
 - v1.4 (2026-09-10): Kerf question asks the cutting tool and offers presets; rods asked separately.
+- v1.5 (2026-09-10): Material, grain, and factory-edge questions.

@@ -1,6 +1,6 @@
 """
 file: report.py
-version: 1.3
+version: 1.4
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-10
@@ -52,6 +52,10 @@ def cut_list_md(layout: Layout, filename: str, outputs: list[str]) -> str:
     L.append(f"| Outer edge margin | {U.fmt(job.outer_edge_margin, du)} |\n")
     L.append(f"| Part spacing | {spacing} (gap {U.fmt(job.gap, du)}) |\n")
     L.append(f"| Cutting method | {job.cutting_method} |\n")
+    if job.materials:
+        mats = "; ".join(f"{m.id} ({m.kind}" + (f", grain along {m.grain}" if m.grain != "none" else "") + ")"
+                         for m in job.materials.values())
+        L.append(f"| Materials | {mats} |\n")
     L.append(f"| Nest mode | {job.nest_mode} |\n")
     L.append(f"| Engine | {'; '.join(f'{m}: {e}' for m, e in layout.engines_used.items()) or 'n/a'} |\n")
     L.append(f"| Coordinates | x from left edge, y from top edge, to the part's bounding-box corner |\n\n")
@@ -188,6 +192,9 @@ def layout_json(layout: Layout, filename: str) -> str:
         "units": "in",
         "sheet": {"width": job.sheet_width, "height": job.sheet_height, "preset": job.sheet_preset},
         "stocks": [{"width": st.width, "height": st.height, "quantity": st.quantity, "preset": st.preset} for st in job.stocks],
+        "materials": {m.id: {"kind": m.kind, "grain": m.grain, "thickness": m.thickness,
+                             "banding_thickness": m.banding_thickness} for m in job.materials.values()},
+        "material_warnings": job.material_warnings,
         "kerf": job.kerf, "cut_tool": job.cut_tool, "kerf_source": job.kerf_source,
         "outer_edge_margin": job.outer_edge_margin, "part_spacing_mode": job.part_spacing_mode, "gap": job.gap,
         "cutting_method": job.cutting_method, "nest_mode": job.nest_mode,
@@ -218,5 +225,6 @@ def layout_json(layout: Layout, filename: str) -> str:
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): Per-sheet sizes and stock list in reports.
+# v1.4 (2026-09-10): Materials in the cut list and layout JSON.
 # v1.3 (2026-09-10): Kerf provenance in the cut list and layout JSON; per-rod cut tool.
 # v1.2 (2026-09-05): Labels section in the cut list; label fields in the layout JSON.

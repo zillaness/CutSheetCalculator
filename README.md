@@ -1,6 +1,6 @@
 ---
 file: README.md
-version: 1.4
+version: 1.5
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-10
@@ -74,7 +74,25 @@ outline) or beside the cutout (in the waste). Text size follows the machine (`ma
 laser raster, single-line strokes for routers. Labels that cannot fit fall back and the
 validation report lists every one. Machine profiles in `cut-sheet-builder/assets/profiles/`
 hold shop defaults; reference one with `"profile": "router_1_8"`. Details:
-`cut-sheet-builder/references/job_schema_v1.5.md` and `docs/piece_labeling_prd_v1.2.md`.
+`cut-sheet-builder/references/job_schema_v1.6.md` and `docs/piece_labeling_prd_v1.2.md`.
+
+## Materials and grain
+
+An optional `materials` block says what the stock is, and stock entries and parts reference it
+by id. A material carries its `kind` (`sheet`, `bar`, `roll`), its `grain` direction, thickness,
+and banding thickness.
+
+`grain` on a part (`along`, `across`, or `any`) constrains which angles the packer may use, so a
+plywood shelf keeps its face grain running the right way. Impossible combinations are refused
+when the job loads rather than discovered at the saw: a square with no declared grain axis, a
+locked rotation that fights the grain, a rotation step with no compliant angle. The validation
+report proves every placed piece honors its grain.
+
+Parts name the edges that must land on known-straight stock with `reference`. A rectangle
+answers to `left`/`right`/`top`/`bottom`; an imported outline answers to the index of a straight
+run, because a shape with no top side has nothing honest to call "top". Stock declares which of
+its own sides are still factory with `factory_edges`, so an offcut can be described truthfully.
+Details: `cut-sheet-builder/references/job_schema_v1.6.md`.
 
 ## Kerf presets
 
@@ -84,7 +102,7 @@ starting points, not truth: set `kerf` yourself once you have measured your own 
 wins without complaint. A CNC router has no preset because its kerf is the bit. Rods take
 their own `cut_tool`, since bar stock is often cut on a different saw than sheet goods. The
 cut list names the kerf and where it came from. Details:
-`cut-sheet-builder/references/job_schema_v1.5.md`.
+`cut-sheet-builder/references/job_schema_v1.6.md`.
 
 ## Engines
 
@@ -100,3 +118,4 @@ shapely greedy nester. The validation report always says which one ran. See
 - v1.2 (2026-09-04): GitHub Pages deployment section.
 - v1.3 (2026-09-05): Piece labels and profiles section.
 - v1.4 (2026-09-10): Kerf presets section; doc version bumps.
+- v1.5 (2026-09-10): Materials and grain section.

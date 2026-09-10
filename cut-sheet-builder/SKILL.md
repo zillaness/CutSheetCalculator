@@ -12,7 +12,7 @@ description: >
   plywood", or any request to figure out where parts go on a sheet or how much material
   to buy, even if the word "nest" never appears.
 metadata:
-  version: "1.5"
+  version: "1.6"
   author: Samuel Cao
   created: "2026-09-04"
   last_updated: "2026-09-10"
@@ -76,8 +76,8 @@ CSB="python3 $SKILL_DIR/scripts/cut_sheet_builder.py"
 |---|---|
 | CLI (echo, build, deps, presets) | `scripts/cut_sheet_builder.py` |
 | Engine package | `scripts/cutsheet/` |
-| Job file schema | `references/job_schema_v1.5.md` |
-| Intake question set | `references/intake_questions_v1.4.md` |
+| Job file schema | `references/job_schema_v1.6.md` |
+| Intake question set | `references/intake_questions_v1.5.md` |
 | Engine and fallback notes | `references/engine_notes_v1.3.md` |
 | Trophy regression job | `assets/examples/trophy_job_v1.0.json` |
 | Irregular-outline job + SVG | `assets/examples/l_bracket_job_v1.0.json`, `l_bracket_v1.0.svg` |
@@ -88,7 +88,7 @@ CSB="python3 $SKILL_DIR/scripts/cut_sheet_builder.py"
 
 ### 1. Interview (always)
 
-Run `user-input-protocol` with the question set in `references/intake_questions_v1.4.md`.
+Run `user-input-protocol` with the question set in `references/intake_questions_v1.5.md`.
 Ask in that order. `cutting_method` and sheet size are never defaulted; everything else has
 a sensible default the file names, but confirm anything that changes material use (kerf,
 margin, spacing mode, rotation policy for engraved or grained parts).
@@ -98,7 +98,7 @@ conversation first and ask only the gaps.
 
 ### 2. Write the job JSON
 
-Write `<job>_job_v1.0.json` following `references/job_schema_v1.5.md`. Keep imported
+Write `<job>_job_v1.0.json` following `references/job_schema_v1.6.md`. Keep imported
 outline files next to it (relative `source.path`). Units: set `units.input` to whatever
 the user typed in; the engine stores inches internally and converts back for display.
 
@@ -237,3 +237,4 @@ guillotine), group isolation and deferral order, determinism, and which engine r
 - v1.3 (2026-09-04): Multiple stock sizes (`sheets` list, offcuts first).
 - v1.4 (2026-09-05): Piece labels (piece_labeling PRD v1.1), machine and outputs questions, machine profiles.
 - v1.5 (2026-09-10): Kerf presets by cutting tool (`cut_tool`), per-rod tool override, kerf provenance in the cut list.
+- v1.6 (2026-09-10): Material model foundations: `materials` block, stock factory edges, segment addressing for part edges, grain as a rotation constraint with a verification check.

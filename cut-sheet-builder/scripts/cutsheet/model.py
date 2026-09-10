@@ -1,6 +1,6 @@
 """
 file: model.py
-version: 1.5
+version: 1.6
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-10
@@ -18,6 +18,7 @@ from typing import Any, Optional
 from shapely.geometry import Polygon, box
 from shapely import affinity
 
+from . import edges
 from . import units as U
 
 SHEET_PRESETS = {
@@ -38,6 +39,10 @@ LABEL_TEXTS = ("id", "id+copy")
 LABEL_ORIENTATIONS = ("upright", "follow-part")
 LABEL_FALLBACKS = ("on-piece", "drop")
 OUTPUT_KINDS = ("reference", "svg", "dxf", "pdf")
+MATERIAL_KINDS = ("sheet", "bar", "roll")
+STOCK_GRAINS = ("none", "width", "height")   # which of the stock's own dimensions the grain runs along
+PART_GRAINS = ("any", "along", "across")     # the part's grain relative to the stock's
+PART_GRAIN_AXES = ("width", "height")        # which of the part's own dimensions carries its grain
 
 # Typical kerf by cutting tool, in inches. Starting points to be measured, not truth: blades
 # vary by brand and wear. An explicit "kerf" always wins over anything in here. cnc_router is
@@ -113,6 +118,26 @@ class LabelSettings:
 
 
 @dataclass
+class Material:
+    """What the stock is, as far as placement is concerned. Not a cost or inventory record."""
+    id: str
+    kind: str = "sheet"                     # sheet | bar | roll
+    grain: str = "none"                     # none | width | height, in the stock's own frame
+    thickness: Optional[float] = None       # base units; informational in v1
+    banding_thickness: Optional[float] = None
+    default_factory_edges: object = "all"   # "all" | "none" | list of sides, for stock that does not say
+
+
+@dataclass
+class Reference:
+    """Edges of a part that must land on known-straight stock. The job names the edges; the
+    packer decides which stock edge or corner each one gets."""
+    edges: list[str]
+    corner: bool = False
+    required: bool = False   # True turns a downgrade into a failure
+
+
+@dataclass
 class Part:
     id: str
     quantity: int
@@ -131,6 +156,22 @@ class Part:
     label_text: Optional[str] = None   # per-part text on the piece (defaults to the id)
     source: str = "typed"
     notes: str = ""
+    material: Optional[str] = None
+    grain: str = "any"                     # any | along | across
+    grain_axis: Optional[str] = None       # width | height; None = the longer side (see grain_axis_resolved)
+    reference: Optional[Reference] = None
+    banded_edges: list = field(default_factory=list)
+
+    @property
+    def grain_axis_resolved(self) -> Optional[str]:
+        """Which of the part's own dimensions carries the grain, in base orientation.
+        Defaults to the longer side, because that is what "the grain runs the long way" means
+        on a plank or a panel. A square has no longer side, so it must say."""
+        if self.grain_axis is not None:
+            return self.grain_axis
+        if abs(self.width - self.height) < 1e-9:
+            return None
+        return "width" if self.width > self.height else "height"
 
     @property
     def is_rectangle(self) -> bool:
@@ -153,9 +194,28 @@ class Part:
         """Per-part rotation_step wins over the job's. Returns a float (degrees) or "free"."""
         return self.rotation_step if self.rotation_step is not None else job_step
 
-    def allowed_angles(self, rotation_step, mode: str) -> list[float]:
+    def grain_ok(self, angle: float, stock_grain: Optional[str]) -> bool:
+        """Would this part's grain run the way the job asked, at this angle on this stock?"""
+        if self.grain == "any" or not stock_grain or stock_grain == "none":
+            return True
+        axis = self.grain_axis_resolved
+        if axis is None:
+            return True  # a square with no declared axis; the loader has already refused this
+        a = round(float(angle) % 360, 6)
+        if a not in (0.0, 90.0, 180.0, 270.0):
+            return False  # a tilted part cannot line up with the grain at all
+        turned = axis if a in (0.0, 180.0) else ("height" if axis == "width" else "width")
+        return (self.grain == "along") == (turned == stock_grain)
+
+    def allowed_angles(self, rotation_step, mode: str, stock_grain: Optional[str] = None) -> list[float]:
         """Coarse angles the packer may try for this part. Locked parts get exactly one.
-        "free" returns the 15-degree grid; the outline nester refines around the best hit."""
+        "free" returns the 15-degree grid; the outline nester refines around the best hit.
+        A grain requirement filters the result. For an outline that leaves both 0 and 180, so a
+        grained part keeps the end-for-end flip a locked rotation would deny it. A rectangle is
+        only ever offered 0 and 90 to begin with, since flipping a box changes nothing."""
+        return [a for a in self._angles(rotation_step, mode) if self.grain_ok(a, stock_grain)]
+
+    def _angles(self, rotation_step, mode: str) -> list[float]:
         if self.rotation == "locked":
             return [float(self.locked_angle) % 360]
         if mode == "bounding-box" or self.is_rectangle:
@@ -181,6 +241,8 @@ class Stock:
     height: float
     quantity: Optional[int] = None
     preset: Optional[str] = None
+    material: Optional[str] = None
+    factory_edges: Optional[frozenset] = None  # None = inherit the material default
 
     @property
     def label(self) -> str:
@@ -228,6 +290,8 @@ class Job:
     outputs: Optional[list] = None  # None = everything available
     profile: Optional[str] = None
     cut_tool: Optional[str] = None
+    materials: dict = field(default_factory=dict)
+    material_warnings: list = field(default_factory=list)
     kerf_source: str = "entered"  # "entered" or "preset:<tool>"
     labels: LabelSettings = field(default_factory=LabelSettings)
     spacing_bump: Optional[tuple] = None  # (configured gap, effective gap) when labels raised the spacing
@@ -302,6 +366,27 @@ class Job:
     def usable(self, stock: "Stock") -> tuple[float, float]:
         return (stock.width - 2 * self.outer_edge_margin, stock.height - 2 * self.outer_edge_margin)
 
+    def material_of(self, holder) -> Optional[Material]:
+        """The Material a stock or part references, or None when it names none."""
+        mid = getattr(holder, "material", None)
+        return self.materials.get(mid) if mid else None
+
+    def stock_grain(self, stock: "Stock") -> str:
+        """Grain axis of this stock, in its own frame. "none" when the material says nothing."""
+        mat = self.material_of(stock)
+        return mat.grain if mat else "none"
+
+    def stock_factory_edges(self, stock: "Stock") -> frozenset:
+        """Which of this stock's own sides are known straight."""
+        if stock.factory_edges is not None:
+            return stock.factory_edges
+        mat = self.material_of(stock)
+        return _factory_edge_set(mat.default_factory_edges if mat else "all", "material")
+
+    @property
+    def uses_grain(self) -> bool:
+        return any(p.grain != "any" for p in self.parts) and any(self.stock_grain(st) != "none" for st in self.stocks)
+
     @property
     def multi_stock(self) -> bool:
         return len(self.stocks) > 1
@@ -326,6 +411,87 @@ def _req(d: dict, key: str, ctx: str):
     return d[key]
 
 
+def _stock_material(sheet) -> Optional[str]:
+    mid = sheet.get("material") if isinstance(sheet, dict) else None
+    return str(mid) if mid else None
+
+
+def _stock_edges(sheet, ctx: str) -> Optional[frozenset]:
+    """None means "inherit the material default"; an offcut should say which sides it kept."""
+    if not isinstance(sheet, dict) or "factory_edges" not in sheet:
+        return None
+    return _factory_edge_set(sheet["factory_edges"], f"{ctx}.factory_edges")
+
+
+def _factory_edge_set(value, ctx: str) -> frozenset:
+    """"all" | "none" | a list of sides -> the set of sides known straight."""
+    if value is None or value == "all":
+        return frozenset(edges.SIDES)
+    if value == "none":
+        return frozenset()
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple)):
+        raise JobError(f"{ctx}: factory_edges must be 'all', 'none', or a list of {list(edges.SIDES)}")
+    out = set()
+    for v in value:
+        side = str(v).strip().lower()
+        if side not in edges.SIDES:
+            raise JobError(f"{ctx}: '{v}' is not a stock side; use {list(edges.SIDES)}")
+        out.add(side)
+    return frozenset(out)
+
+
+def _parse_materials(raw: dict, to_base) -> dict:
+    """materials[] is optional. A job without it behaves exactly as it did before."""
+    lst = raw.get("materials")
+    if lst is None:
+        return {}
+    if not isinstance(lst, list):
+        raise JobError("'materials' must be a list of material objects")
+    out = {}
+    for i, m in enumerate(lst):
+        ctx = f"materials[{i}]"
+        if not isinstance(m, dict):
+            raise JobError(f"{ctx}: must be an object")
+        mid = str(_req(m, "id", ctx))
+        if mid in out:
+            raise JobError(f"{ctx}: duplicate material id '{mid}'")
+        thick = m.get("thickness")
+        band = m.get("banding_thickness")
+        out[mid] = Material(
+            id=mid,
+            kind=_choice(m.get("kind", "sheet"), MATERIAL_KINDS, f"{ctx}.kind"),
+            grain=_choice(m.get("grain", "none"), STOCK_GRAINS, f"{ctx}.grain"),
+            thickness=to_base(thick) if thick is not None else None,
+            banding_thickness=to_base(band) if band is not None else None,
+            default_factory_edges=m.get("default_factory_edges", "all"),
+        )
+        _factory_edge_set(out[mid].default_factory_edges, f"{ctx}.default_factory_edges")  # fail fast
+    return out
+
+
+def _parse_reference(value, ctx: str) -> Optional[Reference]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = {"edges": [value]}
+    if isinstance(value, list):
+        value = {"edges": value}
+    if not isinstance(value, dict):
+        raise JobError(f"{ctx}: must be an edge name, a list of them, or an object with 'edges'")
+    names = value.get("edges")
+    if isinstance(names, str):
+        names = [names]
+    if not names:
+        raise JobError(f"{ctx}: name at least one edge that must land on factory stock")
+    corner = bool(value.get("corner", False))
+    if corner and len(names) != 2:
+        raise JobError(f"{ctx}: a corner is where two edges meet, so name exactly two (got {len(names)})")
+    return Reference(edges=[str(n).strip().lower() for n in names], corner=corner,
+                     required=bool(value.get("required", False)))
+
+
 def _parse_one_stock(sheet, input_unit: str, ctx: str) -> Stock:
     qty = None
     if isinstance(sheet, str):
@@ -344,13 +510,14 @@ def _parse_one_stock(sheet, input_unit: str, ctx: str) -> Stock:
             if preset not in SHEET_PRESETS:
                 raise JobError(f"{ctx}: preset '{preset}' unknown; presets: {sorted(SHEET_PRESETS)}")
             w, h, u = SHEET_PRESETS[preset]
-            return Stock(U.to_base(w, u), U.to_base(h, u), qty, preset)
+            return Stock(U.to_base(w, u), U.to_base(h, u), qty, preset,
+                         material=_stock_material(sheet), factory_edges=_stock_edges(sheet, ctx))
         su = U.normalize_unit(sheet.get("units", input_unit))
         w = U.to_base(float(_req(sheet, "width", ctx)), su)
         h = U.to_base(float(_req(sheet, "height", ctx)), su)
         if w <= 0 or h <= 0:
             raise JobError(f"{ctx}: sheet dimensions must be positive")
-        return Stock(w, h, qty, None)
+        return Stock(w, h, qty, None, material=_stock_material(sheet), factory_edges=_stock_edges(sheet, ctx))
     raise JobError(f"{ctx}: must be a preset name or an object with width/height")
 
 
@@ -404,6 +571,65 @@ def _validate_labels(job: "Job") -> None:
                 job.spacing_bump = (job.configured_gap, need)
         elif job.configured_gap <= 1e-9:
             raise JobError("beside-cutout labels with shared-edge spacing and auto_spacing off: there is no waste to write in")
+
+
+def _resolve_edge(part: Part, name: str, ctx: str):
+    """Edge lookups fail as JobError, so a caller only ever catches one kind of load error."""
+    try:
+        return edges.resolve(part, name, ctx)
+    except edges.EdgeError as ex:
+        raise JobError(str(ex)) from None
+
+
+def _validate_materials(job: "Job") -> None:
+    """Everything the material model can catch before a single part is placed. A wrong edge
+    name or an impossible grain requirement is cheap now and expensive at the saw."""
+    for holder, ctx in ([(st, f"sheets[{i}]") for i, st in enumerate(job.stocks)] +
+                        [(p, f"part '{p.id}'") for p in job.parts]):
+        mid = getattr(holder, "material", None)
+        if mid and mid not in job.materials:
+            raise JobError(f"{ctx}: unknown material '{mid}'; declared materials: {sorted(job.materials) or 'none'}")
+
+    grained_stocks = [st for st in job.stocks if job.stock_grain(st) != "none"]
+    for p in job.parts:
+        ctx = f"part '{p.id}'"
+
+        # Reference edges must exist on the part, and a corner must be two edges that meet.
+        if p.reference:
+            for name in p.reference.edges:
+                _resolve_edge(p, name, f"{ctx} reference")
+            if p.reference.corner and not edges.adjacent(p, *p.reference.edges):
+                raise JobError(f"{ctx}: reference corner needs two edges that meet, and "
+                               f"'{p.reference.edges[0]}' and '{p.reference.edges[1]}' do not touch")
+
+        # Banding is rectangles-only in v1 (PRD 7.6): offsetting one side of an irregular
+        # outline is a real geometry problem and banding is the lowest-priority feature here.
+        if p.banded_edges:
+            if not p.is_rectangle:
+                raise JobError(f"{ctx}: banded edges are supported on rectangles only in v1; "
+                               f"'{p.id}' is an imported outline")
+            for name in p.banded_edges:
+                _resolve_edge(p, name, f"{ctx} banded_edges")
+
+        if p.grain == "any":
+            continue
+        if not grained_stocks:
+            job.material_warnings.append(
+                f"{ctx} asks for grain '{p.grain}' but no stock declares a grain direction; the requirement is ignored")
+            continue
+        if p.grain_axis_resolved is None:
+            raise JobError(f"{ctx}: is square, so which way its grain runs cannot be guessed; "
+                           f"set grain_axis to 'width' or 'height'")
+        for st in grained_stocks:
+            sg = job.stock_grain(st)
+            if p.allowed_angles(job.rotation_step, job.part_mode(p), sg):
+                break
+        else:
+            if p.rotation == "locked":
+                raise JobError(f"{ctx}: rotation is locked at {p.locked_angle:g} deg, which does not put the "
+                               f"grain '{p.grain}'. Unlock the rotation or drop the grain requirement")
+            raise JobError(f"{ctx}: no allowed angle puts the grain '{p.grain}' on any grained stock "
+                           f"(rotation_step {_step_label(p.effective_step(job.rotation_step))})")
 
 
 def _parse_rotation_step(value, ctx: str):
@@ -516,6 +742,8 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
     def L(v):  # length in input units -> base
         return U.to_base(float(v), input_unit)
 
+    materials = _parse_materials(raw, L)
+
     # Sheet stock: "sheet" (one size) or "sheets" (priority-ordered list, e.g. offcuts first). Never defaulted.
     stocks = _parse_stocks(raw, input_unit)
     sheet_w, sheet_h, preset = stocks[0].width, stocks[0].height, stocks[0].preset
@@ -571,6 +799,15 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
         pstep = pr.get("rotation_step")
         if pstep is not None:
             pstep = _parse_rotation_step(pstep, f"{ctx}.rotation_step")
+        p_material = str(pr["material"]) if pr.get("material") else None
+        p_grain = _choice(pr.get("grain", "any"), PART_GRAINS, f"{ctx}.grain")
+        p_grain_axis = _choice(pr["grain_axis"], PART_GRAIN_AXES, f"{ctx}.grain_axis") if pr.get("grain_axis") else None
+        p_reference = _parse_reference(pr.get("reference"), f"{ctx}.reference")
+        p_banded = pr.get("banded_edges") or []
+        if isinstance(p_banded, str):
+            p_banded = [p_banded]
+        p_banded = [str(b).strip().lower() for b in p_banded]
+
         plabel = pr.get("label") or {}
         if isinstance(plabel, str):
             plabel = {"text": plabel}
@@ -613,6 +850,8 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
             group=pr.get("group"), color=pr.get("color"), nest_mode=pmode, rotation_step=pstep,
             label_mode=p_label_mode, label_text=p_label_text,
             outline=outline, engrave_geoms=engrave_geoms, source=source, notes=notes,
+            material=p_material, grain=p_grain, grain_axis=p_grain_axis,
+            reference=p_reference, banded_edges=p_banded,
         ))
 
     for i, p in enumerate(parts):
@@ -667,11 +906,12 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
         marking_tool_diameter=L(raw["marking_tool_diameter"]) if raw.get("marking_tool_diameter") is not None else None,
         outputs=_parse_outputs(raw.get("outputs")),
         profile=str(profile_name) if profile_name else None,
-        cut_tool=cut_tool, kerf_source=kerf_source,
+        cut_tool=cut_tool, kerf_source=kerf_source, materials=materials,
         labels=_parse_labels(raw, L),
         raw=raw,
     )
     _validate_labels(job)
+    _validate_materials(job)
     for st in stocks:
         uw, uh = job.usable(st)
         if uw <= 0 or uh <= 0:

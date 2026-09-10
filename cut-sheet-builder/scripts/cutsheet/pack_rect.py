@@ -1,6 +1,6 @@
 """
 file: pack_rect.py
-version: 1.1
+version: 1.2
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -206,7 +206,7 @@ def _pack_rectpack(items: list[Item], bin_w: float, bin_h: float, guillotine: bo
 
 
 def pack_rectangles(job: Job, instances: list[Instance], engine: str = "auto", sheet_w=None, sheet_h=None,
-                    max_sheets=None) -> tuple[list[Placement], str, Optional[str], list[Instance]]:
+                    max_sheets=None, stock_grain=None) -> tuple[list[Placement], str, Optional[str], list[Instance]]:
     """Bounding-box packing of instances onto sheets of (sheet_w, sheet_h) (default: the job's first stock),
     opening at most max_sheets. Returns (placements, engine_name, fallback_note, unplaced_instances)."""
     gap = job.gap
@@ -218,7 +218,7 @@ def pack_rectangles(job: Job, instances: list[Instance], engine: str = "auto", s
     for inst in instances:
         opts = []
         seen = set()
-        for a in inst.part.allowed_angles(job.rotation_step, "bounding-box"):
+        for a in inst.part.allowed_angles(job.rotation_step, "bounding-box", stock_grain):
             rp = rotated_normalized(inst.part.base_polygon(), a)
             _, _, w, h = rp.bounds
             key = (round(w, 9), round(h, 9))
@@ -295,4 +295,5 @@ def is_guillotine_cuttable(rects: list[tuple[float, float, float, float]], tol: 
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.2 (2026-09-10): Grain of the current stock filters the angle options.
 # v1.1 (2026-09-04): Sheet size and sheet cap parameters; unplaced instances returned instead of raising.

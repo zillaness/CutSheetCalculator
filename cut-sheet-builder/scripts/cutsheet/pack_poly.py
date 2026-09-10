@@ -1,6 +1,6 @@
 """
 file: pack_poly.py
-version: 1.3
+version: 1.4
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -123,7 +123,7 @@ def _frange(lo: float, hi: float, step: float):
     return [lo + i * step for i in range(n + 1)]
 
 
-def _nest_shapely(job: Job, instances: list[Instance], sheet_w: float, sheet_h: float, max_sheets=None) -> tuple[list[Placement], list[Instance]]:
+def _nest_shapely(job: Job, instances: list[Instance], sheet_w: float, sheet_h: float, max_sheets=None, stock_grain=None) -> tuple[list[Placement], list[Instance]]:
     gap = job.gap
     half = gap / 2.0
     m = job.outer_edge_margin
@@ -151,7 +151,7 @@ def _nest_shapely(job: Job, instances: list[Instance], sheet_w: float, sheet_h: 
 
     def variants(inst: Instance, angles=None):
         out = []
-        for a in (angles if angles is not None else inst.part.allowed_angles(job.rotation_step, "true-outline")):
+        for a in (angles if angles is not None else inst.part.allowed_angles(job.rotation_step, "true-outline", stock_grain)):
             v = variant(inst, a)
             if v is not None:
                 out.append(v)
@@ -298,13 +298,23 @@ def _nest_nest2d(job: Job, instances: list[Instance]) -> list[Placement]:
 
 
 def nest_outlines(job: Job, instances: list[Instance], engine: str = "auto", sheet_w=None, sheet_h=None,
-                  max_sheets=None) -> tuple[list[Placement], str, Optional[str], list[Instance]]:
+                  max_sheets=None, stock_grain=None) -> tuple[list[Placement], str, Optional[str], list[Instance]]:
     """True-outline nesting onto sheets of (sheet_w, sheet_h) (default: the job's first stock), at most max_sheets.
     Returns (placements, engine_name, fallback_note, unplaced_instances)."""
     sheet_w = job.sheet_width if sheet_w is None else sheet_w
     sheet_h = job.sheet_height if sheet_h is None else sheet_h
     fallback = None
-    if engine in ("auto", "nest2d") and max_sheets is None and sheet_w == job.sheet_width and sheet_h == job.sheet_height:
+    # libnest2d takes a single rotation list for the whole job and cannot express a per-part
+    # angle set, so it cannot honor grain. Rather than let it quietly turn a grained part
+    # across the grain, it is ineligible whenever grain is in play.
+    grained = bool(stock_grain) and stock_grain != "none" and any(i.part.grain != "any" for i in instances)
+    if grained and engine == "nest2d":
+        raise ValueError("engine 'nest2d' cannot honor a grain direction: libnest2d applies one rotation "
+                         "list to every part. Use engine 'auto' or 'shapely' for grained jobs")
+    if grained:
+        fallback = ("grain is in use, so nest2d was not eligible (it applies one rotation list to the whole job); "
+                    "used the bundled shapely greedy nester, which packs less densely")
+    if not grained and engine in ("auto", "nest2d") and max_sheets is None and sheet_w == job.sheet_width and sheet_h == job.sheet_height:
         try:
             pl = _nest_nest2d(job, instances)
             return pl, "nest2d (libnest2d no-fit-polygon)", None, []
@@ -316,7 +326,7 @@ def nest_outlines(job: Job, instances: list[Instance], engine: str = "auto", she
             if engine == "nest2d":
                 raise
             fallback = f"nest2d failed ({ex}); used the bundled shapely greedy nester (lower packing density)"
-    pl, unplaced = _nest_shapely(job, instances, sheet_w, sheet_h, max_sheets)
+    pl, unplaced = _nest_shapely(job, instances, sheet_w, sheet_h, max_sheets, stock_grain)
     label = "free (15 deg grid + 1 deg refine)" if job.rotation_step == FREE_ROTATION else f"{float(job.rotation_step):g} deg"
     if any(i.part.rotation_step is not None for i in instances):
         label += ", per-part overrides"
@@ -328,3 +338,4 @@ def nest_outlines(job: Job, instances: list[Instance], engine: str = "auto", she
 # v1.1 (2026-09-04): Free-rotation refinement pass and per-part rotation steps.
 # v1.2 (2026-09-04): Slide the top 6 candidate anchors before choosing (denser packing).
 # v1.3 (2026-09-04): Sheet size and cap parameters; unplaced instances returned instead of raising.
+# v1.4 (2026-09-10): Grain filters the angle set; nest2d is ineligible for grained jobs and says so.

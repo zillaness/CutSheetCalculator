@@ -170,11 +170,13 @@ def build_layout(job: Job) -> Layout:
                 continue
             if use_outline:
                 engine = job.engine_2d if job.engine_2d in ("auto", "nest2d", "shapely") else "auto"
-                placements, used, fb, remaining = nest_outlines(job, remaining, engine, stock.width, stock.height, cap)
+                placements, used, fb, remaining = nest_outlines(job, remaining, engine, stock.width, stock.height, cap,
+                                                               job.stock_grain(stock))
                 layout.engines_used["true-outline"] = used
             else:
                 engine = job.engine_2d if job.engine_2d in ("auto", "rectpack", "bundled") else "auto"
-                placements, used, fb, remaining = pack_rectangles(job, remaining, engine, stock.width, stock.height, cap)
+                placements, used, fb, remaining = pack_rectangles(job, remaining, engine, stock.width, stock.height, cap,
+                                                                 job.stock_grain(stock))
                 if "true-outline" in modes and all_rects and job.cutting_method != "guillotine":
                     used += " (all parts are rectangles, so true-outline mode used the rectangle packer)"
                 layout.engines_used["bounding-box"] = used
