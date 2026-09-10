@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 file: build_web.py
-version: 1.3
+version: 1.4
 author: Sam Cao
 created: 2026-09-04
-last_updated: 2026-09-04
+last_updated: 2026-09-10
 description: Builds web/index.html from web/template.html by embedding the cutsheet engine (zipped, base64) and the example files, so the page is a single self-contained static file.
 ai_update: Update last_updated and version. Append changelog at bottom.
 """
@@ -16,6 +16,7 @@ import datetime as _dt
 import io
 import json
 import os
+import re
 import sys
 import zipfile
 
@@ -71,8 +72,21 @@ def build(date: str | None = None) -> str:
     return html
 
 
+_STAMPED_DATE = re.compile(r"^  last_updated: (\d{4}-\d{2}-\d{2})$", re.M)
+
+
 def main() -> int:
     out = os.path.join(HERE, "index.html")
+    if os.path.exists(out):
+        with open(out, encoding="utf-8") as fh:
+            prev = fh.read()
+        stamped = _STAMPED_DATE.search(prev)
+        # Rebuilding on a later day must not report the page as stale. Re-stamp the build
+        # date only when the generated content actually changed, so the CI staleness check
+        # tracks the engine instead of the calendar.
+        if stamped and build(stamped.group(1)) == prev:
+            print(f"{out} is current (kept build date {stamped.group(1)})")
+            return 0
     html = build()
     with open(out, "w", encoding="utf-8") as fh:
         fh.write(html)
@@ -89,3 +103,5 @@ if __name__ == "__main__":
 # v1.1 (2026-09-04): Pyodide 0.27.7.
 # v1.2 (2026-09-05): Engine zip includes subpackages and font files.
 # v1.3 (2026-09-05): Shipped profiles embedded.
+# v1.4 (2026-09-10): Keep the committed build date when regenerated content is identical,
+#                    so the CI staleness check tracks the engine and not the calendar.
