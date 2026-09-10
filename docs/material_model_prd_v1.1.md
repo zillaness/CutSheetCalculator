@@ -1,14 +1,14 @@
 ---
-file: material_model_prd_v1.0.1.md
-version: 1.0.1
+file: material_model_prd_v1.1.md
+version: 1.1
 author: Sam Cao
 created: 2026-09-10
 last_updated: 2026-09-10
-description: PRD for the material model in cut-sheet-builder: factory edges and corners as an assignable resource, grain direction as a rotation constraint, roll stock with run-length reporting, edge banding as a size convention, and kerf presets by cutting tool. Draft for sign-off; nothing built yet.
+description: PRD for the material model in cut-sheet-builder: factory edges and corners as an assignable resource, grain direction as a rotation constraint, roll stock with run-length reporting, edge banding as a size convention, and kerf presets by cutting tool. Signed off 2026-09-10 after review; section 7.9 questions answered and folded in.
 ai_update: Update last_updated and version. Rename file to match. Append changelog at bottom.
 ---
 
-# Material model (factory edges, grain, roll, banding, kerf presets) — PRD v1.0, draft for sign-off
+# Material model (factory edges, grain, roll, banding, kerf presets) — PRD v1.1, signed off
 
 First of three PRDs. This one lands the material concept because the other two sit on top of
 it. PRD 2 is 1D upgrades (miters, bevels, cross-section symmetry, end pieces). PRD 3 is
@@ -156,12 +156,23 @@ already uses.
 
 Both features attach attributes to *an edge of a part*, so they share one addressing scheme.
 
-Edges are named in the part's base (unrotated) orientation as `left`, `right`, `top`,
-`bottom`. For a typed rectangle these are unambiguous. For an imported outline, v1 defines
-them as the four sides of the part's bounding box, and an edge is only addressable when the
-outline actually runs along that side of its bounding box within a tolerance. An outline with
-no straight side there gets a load-time error naming the part and the edge, rather than a
-guess. Curved or angled reference edges are a v1.x problem and are called out as such.
+**You name the edges you care about; the calculator decides which stock edge or corner they
+land on.** That division matters. The user knows which edge of the part has to be straight.
+Only the packer knows which sheet edges are still unspent when that part gets placed.
+
+Edges are addressed as **segments of the part's own outline**, not as sides of its bounding
+box. For a typed rectangle the four sides are the four segments, addressable as `left`,
+`right`, `top`, `bottom` in the part's base orientation. For an imported outline, the
+addressable segments are its straight runs, named either by index or by a `factory`,
+`reference`, or `banded` layer in the source DXF or SVG. That layer convention is the one
+already used for engrave and score geometry on import, so it costs no new machinery and no
+new habit.
+
+Addressing by segment rather than by bounding-box side dissolves the curved-outline problem
+instead of ruling on it. You can only name a segment that exists, and a segment of a polygon
+outline is straight by construction. There is no case where the tool has to guess what you
+meant by "the top edge" of a shape with no top edge. What remains is a plain load-time error,
+naming the part and the segment, when a named segment is not found or a named layer is empty.
 
 Stock gains `factory_edges`: which of its own four sides are known straight, as `all`, `none`,
 or a list of `left` / `right` / `top` / `bottom`. A **factory corner** is not a separate
@@ -175,8 +186,9 @@ A part declares what it needs:
 "reference": { "edges": ["bottom"], "corner": false }
 ```
 
-or `"corner": true` with two adjacent edges named, meaning both must land on factory stock
-edges that meet.
+or `"corner": true` with two adjacent segments named, meaning both must land on factory stock
+edges that meet. Two named segments that are not adjacent on the part outline are a load-time
+error, since no corner can satisfy them.
 
 ### 7.3 Factory-edge assignment and pre-placement
 
@@ -242,9 +254,21 @@ Interactions, all resolved at load time rather than at pack time:
   grained parts. At the default, grained parts do not free-rotate, and the report says so.
 - A grained part on ungrained stock is a warning, not an error, and it is reported.
 
-**Cost disclosure** is the open question in 7.9: grain constrains rotation, so it can cost
-sheets. Reporting "grain cost you one sheet" means packing twice and comparing, which doubles
-the run for a nice-to-have number.
+**Cost disclosure runs by default whenever any part declares grain**, and can be switched off
+with `report_constraint_cost: false` when it gets tiresome. It packs the job a second time with
+grain ignored and reports the difference.
+
+The draft had this behind an off-by-default flag on the grounds that the number was
+interesting but not actionable. That reasoning was wrong. The number is the most actionable
+thing in the feature: seeing that grain cost a whole sheet is what makes you go back and ask
+which parts actually need it. Most jobs have a few parts where grain is structural or visible
+and a long tail where it was declared out of habit.
+
+So the report does not stop at a total. It attributes the cost **per part**, listing which
+grain requirements forced the extra sheet and what dropping each one would recover. A total
+tells you grain is expensive; the attribution tells you which requirement to reconsider.
+
+The second pack only runs when grain is actually in use, so ungrained jobs pay nothing.
 
 ### 7.5 Roll stock
 
@@ -267,7 +291,16 @@ because that is how roll goods are bought. This needs a display-only yard conver
 `units.py`; `yd` does not become a job input unit.
 
 Nap is grain. Directional vinyl reuses 7.4 with no new concept, which is the argument for
-doing grain before roll.
+doing grain before roll. **Roll material defaults to `grain: "none"`**, because most roll goods
+have no direction; a pattern, a nap, or a leather grain is the exception and has to be
+declared. This matters for the oversize case below, where an undeclared direction would
+otherwise block a rotation that is perfectly fine.
+
+A part wider than the roll is a hard error, never an automatic rotation: on directional
+material a silent rotation ruins the piece and you would not find out until it is cut. The
+error message does the work instead, saying whether rotating the part 90 degrees would fit and
+whether the material's grain permits it. On the common ungrained roll that message is a
+straight yes, and the fix is one field.
 
 A roll offcut is genuinely reusable, unlike a sheet drop, so when `total_length` is declared
 the report states remaining length as well as consumed.
@@ -290,6 +323,11 @@ banded edge must declare:
 `banding_thickness` on each banded edge. `cut` means declared sizes are what gets cut and
 banding is added afterwards, so the layout is unchanged and banding is informational. The cut
 list reports both numbers per part either way, plus total linear banding needed per material.
+
+**v1 bands rectangles only.** Subtracting a banding thickness from one side of an irregular
+outline is a real single-sided polygon offset, which is the most geometry risk in the PRD for
+the feature ranked last. An outline with banded edges is a load-time error naming the part.
+Panels are rectangles, and banding is a panel concern, so this costs little in practice.
 
 One observation worth recording rather than building: a banded edge does not need to be
 straight off the saw, because the banding covers it. So a banded edge is a *good* candidate to
@@ -338,18 +376,23 @@ on a different saw than sheet goods.
 - Banding: convention in force, per-part cut versus finished sizes, total linear banding.
 - Kerf: value, tool, and whether it came from a preset or was entered by hand.
 
-### 7.9 Open questions for sign-off
+### 7.9 Questions resolved at sign-off
 
-1. **Grain cost disclosure.** Report "grain cost N extra sheets" by packing twice and
-   comparing? It roughly doubles run time for a number that is informative but not actionable.
-   Proposal: off by default, available as `report_constraint_cost: true`.
-2. **Reference edges on curved outlines.** v1 errors when a named edge is not straight along
-   the bounding box. Acceptable, or is a nearest-straight-segment heuristic wanted now?
-3. **Roll width strictness.** If a part is wider than the roll, is that always a hard error, or
-   should the tool suggest rotating it when grain permits?
-4. **Banding on imported outlines.** Restrict banding to rectangles in v1? Subtracting a
-   banding thickness from one side of an irregular outline is a real offset operation and is
-   noticeably more work than the rectangle case.
+The v1.0 draft carried four open questions. All four are answered and folded into the design
+above; they are recorded here with what changed.
+
+1. **Grain cost disclosure.** Draft proposed off by default. **Answered: on by default whenever
+   grain is used, with a flag to turn it off.** The draft's premise (informative but not
+   actionable) was wrong, and the correction drove the per-part attribution in 7.4.
+2. **Reference edges on curved outlines.** Draft proposed erroring when a bounding-box side is
+   not straight. **Answered by reframing the addressing itself**: you name segments of the part
+   you want on a factory edge, and the calculator assigns them to stock edges. A named segment
+   is straight by construction, so the question largely dissolves. What is left is a load-time
+   error when a named segment is missing. See 7.2.
+3. **Roll width strictness.** **Answered: hard error, with the message saying whether a 90
+   degree rotation would fit and whether grain allows it.** Roll material also defaults to no
+   grain, since most roll goods have none. See 7.5.
+4. **Banding on imported outlines.** **Answered: rectangles only in v1.** See 7.6.
 
 ## 8. Scope by phase
 
@@ -427,8 +470,18 @@ on a different saw than sheet goods.
 11. `cut_tool: "table_saw"` with no kerf: kerf resolves to 0.125 and the report says preset.
     Adding an explicit kerf overrides it and the report says entered.
 12. Guillotine plus opposite-edge pre-placement that cannot separate: hard error.
+13. Grained job: the constraint-cost pack runs by default and the report attributes the extra
+    sheet to specific parts. `report_constraint_cost: false` suppresses it. An ungrained job
+    never runs the second pack (asserted by counting packs, not by timing).
+14. Imported outline with a `factory` layer: the marked segments become the reference edges.
+    Naming a segment that does not exist errors and names the part and the segment.
+15. Two named segments that are not adjacent, with `corner: true`: load-time error.
+16. Roll material defaults to no grain. A part wider than the roll errors, and the message says
+    whether rotating would fit. With grain declared across the roll, the message says the
+    rotation is not allowed.
+17. Outline part with banded edges: load-time error naming the part (rectangles only in v1).
 
-## 12. Decisions taken into this draft
+## 12. Decisions
 
 1. Three PRDs, material first. Confirmed 2026-09-10.
 2. Feature priority factory edge, grain, roll, banding. Confirmed 2026-09-10.
@@ -437,7 +490,17 @@ on a different saw than sheet goods.
 4. `cut_tool` is separate from `machine` rather than an extension of it.
 5. `size_convention` gets no default, matching `sheet`, `cutting_method`, and `machine`.
 6. Grain is implemented as a filter on `Part.allowed_angles` and nowhere else.
+7. Reference edges are addressed as segments of the part outline, not sides of its bounding
+   box, and the calculator picks which stock edge or corner each one lands on. Confirmed
+   2026-09-10; it replaced the draft's bounding-box scheme.
+8. Grain cost reporting is on by default when grain is used, attributed per part, disableable.
+   Confirmed 2026-09-10.
+9. Roll material defaults to no grain; oversize is an error carrying a rotation suggestion.
+   Confirmed 2026-09-10.
+10. Banding is rectangles-only in v1. Confirmed 2026-09-10.
+11. All three PRDs land on one branch rather than a branch per PRD. Confirmed 2026-09-10.
 
 ## CHANGELOG
 - v1.0 (2026-09-10): Initial draft for sign-off.
 - v1.0.1 (2026-09-10): Mark build item 2 (kerf presets) as built; the rest still awaits sign-off.
+- v1.1 (2026-09-10): Signed off. Segment-based reference-edge addressing replaces bounding-box sides; grain cost reporting on by default with per-part attribution; roll defaults to no grain and errors with a rotation suggestion; banding is rectangles-only in v1; five acceptance tests added.
