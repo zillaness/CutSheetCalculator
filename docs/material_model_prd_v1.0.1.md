@@ -1,6 +1,6 @@
 ---
-file: material_model_prd_v1.0.md
-version: 1.0
+file: material_model_prd_v1.0.1.md
+version: 1.0.1
 author: Sam Cao
 created: 2026-09-10
 last_updated: 2026-09-10
@@ -358,7 +358,9 @@ on a different saw than sheet goods.
 1. `materials` block, `Stock.factory_edges`, per-edge addressing, additive schema, no
    behavior change when absent.
 2. Kerf presets and `cut_tool`. Small, self-contained, immediately useful, and it exercises
-   the profile plumbing before the hard work starts.
+   the profile plumbing before the hard work starts. **Built 2026-09-10, ahead of sign-off on
+   the rest of this PRD, because it commits nothing architecturally: it is purely additive,
+   changes no existing job's output, and can be dropped without touching anything else.**
 3. Factory edge and corner: pre-placement, per-edge margin, over-subscription chain, engine
    eligibility, guillotine interaction, report.
 4. Grain: `allowed_angles` filter, load-time conflict errors, `grain_tolerance`, report.
@@ -438,3 +440,4 @@ on a different saw than sheet goods.
 
 ## CHANGELOG
 - v1.0 (2026-09-10): Initial draft for sign-off.
+- v1.0.1 (2026-09-10): Mark build item 2 (kerf presets) as built; the rest still awaits sign-off.

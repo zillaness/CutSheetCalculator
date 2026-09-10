@@ -11,7 +11,7 @@ ai_update: Update last_updated and version. Rename file to match. Append changel
 # Backlog: PRD 2 and PRD 3
 
 Holding pen so these do not get rediscovered. Neither is signed off. Neither is being built.
-PRD 1 is `material_model_prd_v1.0.md`.
+PRD 1 is `material_model_prd_v1.0.1.md`.
 
 ## PRD 2: 1D upgrades
 

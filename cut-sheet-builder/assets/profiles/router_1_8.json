@@ -1,10 +1,10 @@
 {
   "_metadata": {
     "file": "router_1_8.json",
-    "version": "1.0",
+    "version": "1.1",
     "author": "Sam Cao",
     "created": "2026-09-05",
-    "last_updated": "2026-09-05",
+    "last_updated": "2026-09-10",
     "description": "Shop CNC router with a 1/8 in marking tool, labels as single-line text, DXF into CAM. PLACEHOLDER NUMBERS: replace with the real machine values before relying on them.",
     "ai_update": "Update last_updated and version. Append to _changelog array."
   },
@@ -13,12 +13,18 @@
       "version": "1.0",
       "date": "2026-09-05",
       "note": "Initial placeholder profile."
+    },
+    {
+      "version": "1.1",
+      "date": "2026-09-10",
+      "note": "Name the cutting tool. The explicit kerf still wins; the tool records what makes the cut."
     }
   ],
   "name": "router_1_8",
   "machine": "router",
   "marking_tool_diameter": 0.125,
   "sheet": "plywood_4x8",
+  "cut_tool": "cnc_router",
   "kerf": 0.25,
   "outer_edge_margin": 0.5,
   "part_spacing": {

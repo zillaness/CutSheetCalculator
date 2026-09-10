@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   file: index.html (built from template.html by build_web.py; do not edit index.html by hand)
-  version: 1.3
+  version: 1.4
   author: Sam Cao
   created: 2026-09-04
   last_updated: __BUILD_DATE__
@@ -112,7 +112,8 @@
     <span class="field">Cutting method <span class="req">(required, no default)</span>
       <span><label><input type="radio" name="cutting" value="free"> free (laser, CNC, jigsaw)</label>
       &nbsp; <label><input type="radio" name="cutting" value="guillotine"> guillotine (table saw, full cuts)</label></span></span>
-    <label class="field">Kerf<input id="kerf" type="number" step="any" value="0.125"></label>
+    <label class="field">Cutting tool<select id="cut-tool"><option value="">(none: enter kerf)</option></select></label>
+    <label class="field">Kerf<input id="kerf" type="number" step="any" value="0.125"><span class="hint" id="kerf-src"></span></label>
     <label class="field">Outer edge margin<input id="margin" type="number" step="any" value="0.25"></label>
     <label class="field">Part spacing<select id="spacing">
       <option value="kerf-gap">kerf-gap (one kerf between parts)</option>
@@ -197,6 +198,7 @@
 const PYODIDE_VERSION = "__PYODIDE_VERSION__";
 const ENGINE_ZIP_B64 = "__ENGINE_ZIP_B64__";
 const EXAMPLE_LBRACKET_SVG_B64 = "__EXAMPLE_LBRACKET_SVG_B64__";
+const CUT_TOOL_KERF = __CUT_TOOL_KERF__;  // inches; null = no preset (the kerf is the bit)
 const EXAMPLE_TROPHY_JOB = __EXAMPLE_TROPHY_JOB__;
 const SHIPPED_PROFILES = __SHIPPED_PROFILES__;
 
@@ -359,10 +361,14 @@ function collectJob() {
   const deferred = $('#deferred').value.split(',').map(s => s.trim()).filter(Boolean);
   const job = {
     job_name: $('#job-name').value.trim() || 'job', units: { input: units, display: units },
-    outer_edge_margin: parseFloat($('#margin').value), kerf: parseFloat($('#kerf').value), part_spacing: spacing,
+    outer_edge_margin: parseFloat($('#margin').value), part_spacing: spacing,
     cutting_method: cutting.value, nest_mode: $('#nest-mode').value, rotation_step: stepSel === 'free' ? 'free' : parseFloat(stepSel),
     parts, rods, deferred_groups: deferred, output: { version: $('#job-version').value.trim() || '1.0', author: 'Sam Cao' },
   };
+  const cutTool = $('#cut-tool').value;
+  if (cutTool) job.cut_tool = cutTool;
+  // Omit kerf only while it is still the preset's own value, so the engine records the source.
+  if (!($('#kerf').dataset.fromPreset && $('#kerf').dataset.fromPreset === cutTool)) job.kerf = parseFloat($('#kerf').value);
   if (offcuts.length) job.sheets = [...offcuts, sheet]; else job.sheet = sheet;
   const machine = $('#machine').value; if (machine) job.machine = machine;
   const tool = parseFloat($('#tool-dia').value); if (tool > 0) job.marking_tool_diameter = tool;
@@ -481,7 +487,8 @@ function applyProfile(pr) {
   if (!pr) return;
   if (pr.machine) $('#machine').value = pr.machine;
   if (pr.marking_tool_diameter != null) $('#tool-dia').value = pr.marking_tool_diameter;
-  if (pr.kerf != null) $('#kerf').value = pr.kerf;
+  if (pr.cut_tool) { $('#cut-tool').value = pr.cut_tool; fillKerfFromTool(); }
+  if (pr.kerf != null) { $('#kerf').value = pr.kerf; $('#kerf').dataset.fromPreset = ''; $('#kerf-src').textContent = ''; }
   if (pr.outer_edge_margin != null) $('#margin').value = pr.outer_edge_margin;
   if (pr.part_spacing) { $('#spacing').value = pr.part_spacing.mode || 'kerf-gap'; $('#spacing').onchange(); if (pr.part_spacing.value != null) $('#spacing-value').value = pr.part_spacing.value; }
   if (pr.cutting_method) { const r = document.querySelector(`input[name=cutting][value=${pr.cutting_method}]`); if (r) r.checked = true; }
@@ -496,7 +503,7 @@ function formAsProfile(name) {
   const req = (() => { try { return collectJob(); } catch (e) { return null; } })();
   const j = req ? req.job : {};
   const pr = { name, machine: $('#machine').value || undefined, marking_tool_diameter: parseFloat($('#tool-dia').value) || undefined,
-    sheet: j.sheet || j.sheets?.at(-1), kerf: parseFloat($('#kerf').value), outer_edge_margin: parseFloat($('#margin').value),
+    sheet: j.sheet || j.sheets?.at(-1), cut_tool: $('#cut-tool').value || undefined, kerf: parseFloat($('#kerf').value), outer_edge_margin: parseFloat($('#margin').value),
     part_spacing: j.part_spacing || { mode: $('#spacing').value }, cutting_method: j.cutting_method, nest_mode: $('#nest-mode').value,
     rotation_step: $('#rotation-step').value === 'free' ? 'free' : parseFloat($('#rotation-step').value),
     labels: j.labels || { mode: $('#label-mode').value }, outputs: [...document.querySelectorAll('.out:checked')].map(e => e.value) };
@@ -522,7 +529,31 @@ $('#sheet-preset').onchange = () => { const c = $('#sheet-preset').value === 'cu
 $('#sheet-preset').onchange();
 $('#spacing').onchange = () => { $('#spacing-value').disabled = $('#spacing').value !== 'custom-margin'; };
 $('#spacing').onchange();
-$('#units').onchange = () => { const mm = $('#units').value === 'mm'; if (mm && $('#kerf').value === '0.125') { $('#kerf').value = '3'; $('#margin').value = '6'; } if (!mm && $('#kerf').value === '3') { $('#kerf').value = '0.125'; $('#margin').value = '0.25'; } };
+// The kerf box tracks whether its value came from a preset. While it did, the job omits kerf
+// and lets the engine resolve the tool, so the report can say the value came from a preset
+// rather than from the bench. The first manual edit hands control back to the user for good.
+function kerfPerUnit() { return $('#units').value === 'mm' ? 25.4 : 1; }
+function fillKerfFromTool() {
+  const tool = $('#cut-tool').value;
+  const preset = tool ? CUT_TOOL_KERF[tool] : undefined;
+  if (preset == null) {
+    $('#kerf').dataset.fromPreset = '';
+    $('#kerf-src').textContent = tool ? 'no preset: the kerf is the bit, enter it' : '';
+    return;
+  }
+  $('#kerf').value = String(+(preset * kerfPerUnit()).toFixed(4));
+  $('#kerf').dataset.fromPreset = tool;
+  $('#kerf-src').textContent = `from ${tool} preset; measure yours and overwrite`;
+}
+$('#cut-tool').onchange = fillKerfFromTool;
+$('#kerf').addEventListener('input', () => { $('#kerf').dataset.fromPreset = ''; $('#kerf-src').textContent = ''; });
+for (const [name, val] of Object.entries(CUT_TOOL_KERF)) {
+  const o = document.createElement('option');
+  o.value = name;
+  o.textContent = name.replace(/_/g, ' ') + (val == null ? ' (kerf is the bit)' : ` (${val} in)`);
+  $('#cut-tool').append(o);
+}
+$('#units').onchange = () => { const mm = $('#units').value === 'mm'; if ($('#kerf').dataset.fromPreset) { fillKerfFromTool(); } else { if (mm && $('#kerf').value === '0.125') { $('#kerf').value = '3'; $('#margin').value = '6'; } if (!mm && $('#kerf').value === '3') { $('#kerf').value = '0.125'; $('#margin').value = '0.25'; } } };
 window.CSB = { collectJob, renderResults, runEcho, runBuild };  // exposed for the smoke test
 loadEngine();
 </script>

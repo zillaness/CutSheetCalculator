@@ -1,9 +1,9 @@
 ---
 file: README.md
-version: 1.3
+version: 1.4
 author: Sam Cao
 created: 2026-09-04
-last_updated: 2026-09-04
+last_updated: 2026-09-10
 description: Repository overview and quickstart for the cut-sheet-builder skill.
 ai_update: Update last_updated and version. Append changelog at bottom.
 ---
@@ -74,7 +74,17 @@ outline) or beside the cutout (in the waste). Text size follows the machine (`ma
 laser raster, single-line strokes for routers. Labels that cannot fit fall back and the
 validation report lists every one. Machine profiles in `cut-sheet-builder/assets/profiles/`
 hold shop defaults; reference one with `"profile": "router_1_8"`. Details:
-`cut-sheet-builder/references/job_schema_v1.4.md` and `docs/piece_labeling_prd_v1.2.md`.
+`cut-sheet-builder/references/job_schema_v1.5.md` and `docs/piece_labeling_prd_v1.2.md`.
+
+## Kerf presets
+
+Name the tool that makes the cut with `cut_tool` (`table_saw`, `miter_saw`, `jigsaw`,
+`band_saw`, `laser`, and the rest) and the kerf fills itself from a preset. Presets are
+starting points, not truth: set `kerf` yourself once you have measured your own blade and it
+wins without complaint. A CNC router has no preset because its kerf is the bit. Rods take
+their own `cut_tool`, since bar stock is often cut on a different saw than sheet goods. The
+cut list names the kerf and where it came from. Details:
+`cut-sheet-builder/references/job_schema_v1.5.md`.
 
 ## Engines
 
@@ -89,3 +99,4 @@ shapely greedy nester. The validation report always says which one ran. See
 - v1.1 (2026-09-04): Static web page section.
 - v1.2 (2026-09-04): GitHub Pages deployment section.
 - v1.3 (2026-09-05): Piece labels and profiles section.
+- v1.4 (2026-09-10): Kerf presets section; doc version bumps.

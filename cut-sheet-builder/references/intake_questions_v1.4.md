@@ -1,9 +1,9 @@
 ---
 file: intake_questions_v1.0.md
-version: 1.3
+version: 1.4
 author: Sam Cao
 created: 2026-09-04
-last_updated: 2026-09-04
+last_updated: 2026-09-10
 description: The standard interview for a cut-sheet job, in the order to ask it, with which answers have no default.
 ai_update: Update last_updated and version. Rename file to match. Append changelog at bottom.
 ---
@@ -30,7 +30,12 @@ are never defaulted: sheet size and cutting method.
    label sizing and the rotation-step guidance. Routers: the marking tool diameter.
 3b. **Outputs.** Which files: reference SVG, cut SVG, cut DXF, PDF. A router job usually wants
    DXF for CAM; a laser SVG; hand cutting the PDF. Not inferred from the machine.
-4. **Kerf.** Typical: 0.125 in table saw blade, 0.008 to 0.012 in laser on plywood/acrylic.
+4. **Kerf.** Ask which tool makes the cut and offer its preset (`cut_tool`: table saw 0.125,
+   thin kerf 0.094, miter saw 0.110, track or circular saw 0.094, jigsaw 0.060, band saw
+   0.025, laser 0.010, plasma 0.060, waterjet 0.030). A CNC router has no preset: its kerf
+   is the bit, so ask for the diameter. Presets are starting points; if they have measured
+   their own blade, take that number and it wins. Bar stock is often cut on a different saw
+   than sheet goods, so ask separately when the job has rods.
 5. **Outer edge margin.** Sheet edge to nearest part. Typical 0.25 in laser, 0.5 in plywood
    with damaged edges.
 6. **Part spacing mode.** `kerf-gap` (one kerf between parts; the trophy model),
@@ -74,3 +79,4 @@ are never defaulted: sheet size and cutting method.
 - v1.1 (2026-09-04): Rotation step guidance by cutting tool; free mode; per-part override.
 - v1.2 (2026-09-04): Offcuts question.
 - v1.3 (2026-09-05): Profile, machine, outputs, and piece label questions.
+- v1.4 (2026-09-10): Kerf question asks the cutting tool and offers presets; rods asked separately.

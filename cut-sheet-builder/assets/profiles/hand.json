@@ -1,10 +1,10 @@
 {
   "_metadata": {
     "file": "hand.json",
-    "version": "1.0",
+    "version": "1.1",
     "author": "Sam Cao",
     "created": "2026-09-05",
-    "last_updated": "2026-09-05",
+    "last_updated": "2026-09-10",
     "description": "Table saw / hand tools from a printed cut sheet; labels on the PDF only. PLACEHOLDER NUMBERS: replace with the real machine values before relying on them.",
     "ai_update": "Update last_updated and version. Append to _changelog array."
   },
@@ -13,11 +13,17 @@
       "version": "1.0",
       "date": "2026-09-05",
       "note": "Initial placeholder profile."
+    },
+    {
+      "version": "1.1",
+      "date": "2026-09-10",
+      "note": "Name the cutting tool. The explicit kerf still wins; the tool records what makes the cut."
     }
   ],
   "name": "hand",
   "machine": "hand",
   "sheet": "plywood_4x8",
+  "cut_tool": "table_saw",
   "kerf": 0.125,
   "outer_edge_margin": 0.5,
   "part_spacing": {

@@ -1,9 +1,9 @@
 """
 file: test_web_page.py
-version: 1.2
+version: 1.3
 author: Sam Cao
 created: 2026-09-04
-last_updated: 2026-09-04
+last_updated: 2026-09-10
 description: Checks web/index.html is built from the current template and engine, and drives the page in headless Chromium with a stubbed engine that returns real webapi output.
 ai_update: Update last_updated and version. Append changelog at bottom.
 """
@@ -171,8 +171,49 @@ def test_offcut_rows_become_sheets_list(page):
     assert job["sheets"][-1] == "laser_24x18"
 
 
+def test_cut_tool_fills_kerf_and_hands_control_back_on_edit(page):
+    page.reload()
+    page.wait_for_function("document.querySelector('#status').textContent.includes('Engine')")
+    page.click("#ex-trophy")
+    page.select_option("#cut-tool", "band_saw")
+    assert page.input_value("#kerf") == "0.025"
+    assert "band_saw" in page.text_content("#kerf-src")
+    # While the value is still the preset's own, the job omits kerf so the engine records the source.
+    job = json.loads(page.evaluate("JSON.stringify(window.CSB.collectJob())"))["job"]
+    assert job["cut_tool"] == "band_saw" and "kerf" not in job
+
+    # The first manual edit takes over for good.
+    page.fill("#kerf", "0.031")
+    job = json.loads(page.evaluate("JSON.stringify(window.CSB.collectJob())"))["job"]
+    assert job["cut_tool"] == "band_saw" and job["kerf"] == 0.031
+    assert page.text_content("#kerf-src") == ""
+
+
+def test_cnc_router_offers_no_kerf_and_says_why(page):
+    page.reload()
+    page.wait_for_function("document.querySelector('#status').textContent.includes('Engine')")
+    page.click("#ex-trophy")
+    before = page.input_value("#kerf")
+    page.select_option("#cut-tool", "cnc_router")
+    assert page.input_value("#kerf") == before  # nothing guessed
+    assert "bit" in page.text_content("#kerf-src")
+    job = json.loads(page.evaluate("JSON.stringify(window.CSB.collectJob())"))["job"]
+    assert job["cut_tool"] == "cnc_router" and job["kerf"] == float(before)
+
+
+def test_preset_kerf_follows_a_unit_switch(page):
+    page.reload()
+    page.wait_for_function("document.querySelector('#status').textContent.includes('Engine')")
+    page.click("#ex-trophy")
+    page.select_option("#cut-tool", "table_saw")
+    assert page.input_value("#kerf") == "0.125"
+    page.select_option("#units", "mm")
+    assert float(page.input_value("#kerf")) == pytest.approx(3.175)
+
+
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): Fall back to Playwright's own Chromium (CI).
+# v1.3 (2026-09-10): Cutting-tool control: preset fill, manual override, CNC router, unit switch.
 # v1.2 (2026-09-05): Profile and label control test.
 # v1.1 (2026-09-04): Offcut rows test.

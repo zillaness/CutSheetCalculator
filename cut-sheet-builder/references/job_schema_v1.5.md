@@ -1,9 +1,9 @@
 ---
-file: job_schema_v1.0.md
-version: 1.4
+file: job_schema_v1.5.md
+version: 1.5
 author: Sam Cao
 created: 2026-09-04
-last_updated: 2026-09-04
+last_updated: 2026-09-10
 description: Field-by-field reference for the cut-sheet-builder job JSON file.
 ai_update: Update last_updated and version. Rename file to match. Append changelog at bottom.
 ---
@@ -22,7 +22,8 @@ starting with `_` (metadata, changelog) are ignored by the engine.
 | `sheet` | **yes (or `sheets`), no default** | preset name, `{ "preset": "..." }`, or `{ "width", "height", "units"? }` | Presets: `laser_24x18`, `plywood_4x8` (96 x 48), `plywood_4x4` |
 | `sheets` | alternative to `sheet` | list of the above, each with optional `quantity` | Used in list order: offcuts first, full sheets last. Every entry except the last needs a `quantity`; the last is unlimited. A part too big for an early stock falls through to a later one. Running out of stock is an error |
 | `outer_edge_margin` | yes | number >= 0 | Sheet boundary to nearest part |
-| `kerf` | yes | number >= 0 | Cut width |
+| `kerf` | yes, unless `cut_tool` supplies one | number >= 0 | Cut width. An explicit value always wins over a preset |
+| `cut_tool` | no | `table_saw`, `table_saw_thin`, `miter_saw`, `circular_saw`, `track_saw`, `jigsaw`, `band_saw`, `cnc_router`, `laser`, `plasma`, `waterjet` | Fills `kerf` from a preset when the job does not state one. Separate from `machine`: a job can be cut on a table saw and labeled by hand. `cnc_router` has no preset because its kerf is the bit |
 | `part_spacing` | no | `{ "mode": "kerf-gap" }` (default), `{ "mode": "shared-edge" }`, `{ "mode": "custom-margin", "value": 0.5 }` | Gap between adjacent parts; independent of `outer_edge_margin` |
 | `cutting_method` | **yes, no default** | `free` or `guillotine` | Guillotine packs bounding boxes so every sheet separates with full cuts |
 | `nest_mode` | no | `true-outline` (default) or `bounding-box` | Per-part override via `parts[].nest_mode` |
@@ -91,8 +92,28 @@ Typed rectangles rotate only 0/90 in every mode.
 | `length` | yes | Piece length |
 | `quantity` | yes | |
 | `stock_length` | no | Bar length to buy. Omit to get continuous length only |
+| `cut_tool` | no | Overrides the job's tool for this bar stock, which often meets a different saw than sheet goods |
+| `kerf` | no | Overrides the job kerf for this rod outright |
 
 Rod math: `n * length + (n - 1) * kerf`. Bars packed first-fit-decreasing.
+
+## Kerf presets
+
+Starting points to be measured, not truth: blades vary by brand and wear. Set `kerf` yourself
+whenever you have measured it, and the tool preset is ignored without complaint.
+
+| Tool | Kerf (in) | Tool | Kerf (in) |
+|---|---|---|---|
+| `table_saw` | 0.125 | `band_saw` | 0.025 |
+| `table_saw_thin` | 0.094 | `cnc_router` | none: the kerf is the bit |
+| `miter_saw` | 0.110 | `laser` | 0.010 |
+| `circular_saw` | 0.094 | `plasma` | 0.060 |
+| `track_saw` | 0.094 | `waterjet` | 0.030 |
+| `jigsaw` | 0.060 | | |
+
+A preset is an absolute length in inches; it is not scaled by `units.input`. A 1/8 in blade is
+1/8 in whatever the job types its numbers in. The cut list names the kerf and where it came
+from, and a profile may carry `cut_tool` as a shop default.
 
 ## Minimal example
 
@@ -120,3 +141,4 @@ Rod math: `n * length + (n - 1) * kerf`. Bars packed first-fit-decreasing.
 - v1.2 (2026-09-04): engrave layer detection note.
 - v1.3 (2026-09-04): sheets list (multiple stock sizes).
 - v1.4 (2026-09-05): profile, machine, marking_tool_diameter, outputs, labels, parts[].label.
+- v1.5 (2026-09-10): cut_tool with kerf presets; kerf optional when a tool supplies it; per-rod cut_tool and kerf.

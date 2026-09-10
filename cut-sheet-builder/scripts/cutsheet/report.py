@@ -1,9 +1,9 @@
 """
 file: report.py
-version: 1.2
+version: 1.3
 author: Sam Cao
 created: 2026-09-04
-last_updated: 2026-09-04
+last_updated: 2026-09-10
 description: Writes the cut list / stock summary markdown, the validation report (markdown + JSON), and the layout JSON, all with revision-control metadata and changelogs.
 ai_update: Update last_updated and version. Append changelog at bottom.
 """
@@ -46,7 +46,9 @@ def cut_list_md(layout: Layout, filename: str, outputs: list[str]) -> str:
     L.append("| Setting | Value |\n|---|---|\n")
     stock_desc = "; ".join(f"{U.fmt(st.width, du)} x {U.fmt(st.height, du)}" + (f" ({st.preset})" if st.preset else "") + (f" x{st.quantity} available" if st.quantity else "") for st in job.stocks)
     L.append(f"| Stock | {stock_desc}" + (" (used in this order)" if job.multi_stock else "") + " |\n")
-    L.append(f"| Kerf | {U.fmt(job.kerf, du)} |\n")
+    kerf_note = f" (preset for {job.cut_tool})" if job.kerf_source.startswith("preset:") else (
+        f" (entered; tool {job.cut_tool})" if job.cut_tool else "")
+    L.append(f"| Kerf | {U.fmt(job.kerf, du)}{kerf_note} |\n")
     L.append(f"| Outer edge margin | {U.fmt(job.outer_edge_margin, du)} |\n")
     L.append(f"| Part spacing | {spacing} (gap {U.fmt(job.gap, du)}) |\n")
     L.append(f"| Cutting method | {job.cutting_method} |\n")
@@ -70,7 +72,8 @@ def cut_list_md(layout: Layout, filename: str, outputs: list[str]) -> str:
         L.append(f"- Utilization: {100 * parts_area / total:.1f}% of sheet area used, {100 * (1 - parts_area / total):.1f}% waste\n")
     if layout.rod_result:
         for r in layout.rod_result["rods"]:
-            line = f"- Rod {r['id']}: {r['quantity']} x {U.fmt(r['piece_length'], du)} with {U.fmt(r['kerf'], du)} kerf = **{U.fmt(r['continuous_length'], du)}** continuous"
+            kerf_src = f" ({r['cut_tool']})" if r.get("cut_tool") else ""
+            line = f"- Rod {r['id']}: {r['quantity']} x {U.fmt(r['piece_length'], du)} with {U.fmt(r['kerf'], du)} kerf{kerf_src} = **{U.fmt(r['continuous_length'], du)}** continuous"
             if r.get("stock_length"):
                 line += f"; **{r['bars_needed']} bar(s)** of {U.fmt(r['stock_length'], du)}, waste {100 * r['waste_fraction']:.1f}%"
             L.append(line + "\n")
@@ -185,7 +188,8 @@ def layout_json(layout: Layout, filename: str) -> str:
         "units": "in",
         "sheet": {"width": job.sheet_width, "height": job.sheet_height, "preset": job.sheet_preset},
         "stocks": [{"width": st.width, "height": st.height, "quantity": st.quantity, "preset": st.preset} for st in job.stocks],
-        "kerf": job.kerf, "outer_edge_margin": job.outer_edge_margin, "part_spacing_mode": job.part_spacing_mode, "gap": job.gap,
+        "kerf": job.kerf, "cut_tool": job.cut_tool, "kerf_source": job.kerf_source,
+        "outer_edge_margin": job.outer_edge_margin, "part_spacing_mode": job.part_spacing_mode, "gap": job.gap,
         "cutting_method": job.cutting_method, "nest_mode": job.nest_mode,
         "engines_used": layout.engines_used, "fallbacks": layout.fallbacks,
         "machine": job.machine, "marking_tool_diameter": job.marking_tool_diameter, "profile": job.profile, "outputs": job.outputs,
@@ -214,4 +218,5 @@ def layout_json(layout: Layout, filename: str) -> str:
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.1 (2026-09-04): Per-sheet sizes and stock list in reports.
+# v1.3 (2026-09-10): Kerf provenance in the cut list and layout JSON; per-rod cut tool.
 # v1.2 (2026-09-05): Labels section in the cut list; label fields in the layout JSON.

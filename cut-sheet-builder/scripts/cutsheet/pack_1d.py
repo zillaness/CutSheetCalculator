@@ -1,10 +1,10 @@
 """
 file: pack_1d.py
-version: 1.0
+version: 1.1
 author: Sam Cao
 created: 2026-09-04
-last_updated: 2026-09-04
-description: First-fit-decreasing rod/bar packing with one kerf between adjacent cuts; reports bars needed, per-bar contents, and offcuts.
+last_updated: 2026-09-10
+description: First-fit-decreasing rod/bar packing with one kerf between adjacent cuts, per-rod kerf override; reports bars needed, per-bar contents, and offcuts.
 ai_update: Update last_updated and version. Append changelog at bottom.
 """
 
@@ -22,16 +22,19 @@ def total_length(pieces: list[float], kerf: float) -> float:
 
 
 def pack_rods(rods: list[Rod], kerf: float) -> dict:
-    """Pack every rod spec separately (different stock lengths are different materials)."""
+    """Pack every rod spec separately (different stock lengths are different materials).
+    A rod may carry its own kerf, since bar stock is often cut on a different saw than sheet goods."""
     results = []
     for rod in rods:
+        rod_kerf = rod.kerf if rod.kerf is not None else kerf
         pieces = [rod.length] * rod.quantity
-        continuous = total_length(pieces, kerf)
+        continuous = total_length(pieces, rod_kerf)
         entry = {
             "id": rod.id,
             "piece_length": rod.length,
             "quantity": rod.quantity,
-            "kerf": kerf,
+            "kerf": rod_kerf,
+            "cut_tool": rod.cut_tool,
             "continuous_length": continuous,
             "stock_length": rod.stock_length,
             "bars": [],
@@ -43,14 +46,14 @@ def pack_rods(rods: list[Rod], kerf: float) -> dict:
             for L in sorted(pieces, reverse=True):  # FFD
                 placed = False
                 for bar in bars:
-                    if total_length(bar + [L], kerf) <= rod.stock_length + 1e-9:
+                    if total_length(bar + [L], rod_kerf) <= rod.stock_length + 1e-9:
                         bar.append(L)
                         placed = True
                         break
                 if not placed:
                     bars.append([L])
             entry["bars"] = [
-                {"pieces": b, "used": total_length(b, kerf), "offcut": rod.stock_length - total_length(b, kerf)}
+                {"pieces": b, "used": total_length(b, rod_kerf), "offcut": rod.stock_length - total_length(b, rod_kerf)}
                 for b in bars
             ]
             entry["bars_needed"] = len(bars)
@@ -61,3 +64,4 @@ def pack_rods(rods: list[Rod], kerf: float) -> dict:
 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
+# v1.1 (2026-09-10): Per-rod kerf override; the rod's cut tool travels into the result.

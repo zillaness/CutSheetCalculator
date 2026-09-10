@@ -1,9 +1,9 @@
 """
 file: model.py
-version: 1.4
+version: 1.5
 author: Sam Cao
 created: 2026-09-04
-last_updated: 2026-09-04
+last_updated: 2026-09-10
 description: Data model for a cut-sheet job (parts, rods, sheet, spacing dials, options) and the JSON loader that builds it, including DXF/SVG outline import.
 ai_update: Update last_updated and version. Append changelog at bottom.
 """
@@ -38,6 +38,23 @@ LABEL_TEXTS = ("id", "id+copy")
 LABEL_ORIENTATIONS = ("upright", "follow-part")
 LABEL_FALLBACKS = ("on-piece", "drop")
 OUTPUT_KINDS = ("reference", "svg", "dxf", "pdf")
+
+# Typical kerf by cutting tool, in inches. Starting points to be measured, not truth: blades
+# vary by brand and wear. An explicit "kerf" always wins over anything in here. cnc_router is
+# deliberately None, because its kerf is the bit and guessing a bit is worse than asking.
+CUT_TOOL_KERF = {
+    "table_saw": 0.125,
+    "table_saw_thin": 0.094,
+    "miter_saw": 0.110,
+    "circular_saw": 0.094,
+    "track_saw": 0.094,
+    "jigsaw": 0.060,
+    "band_saw": 0.025,
+    "cnc_router": None,
+    "laser": 0.010,
+    "plasma": 0.060,
+    "waterjet": 0.030,
+}
 PROFILES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "profiles")
 FREE_ROTATION = "free"
 FREE_COARSE_STEP = 15.0   # coarse grid searched before the fine pass in free mode
@@ -176,6 +193,8 @@ class Rod:
     length: float  # base units
     quantity: int
     stock_length: Optional[float] = None  # None = report total continuous length only
+    cut_tool: Optional[str] = None  # overrides the job's tool for this bar stock
+    kerf: Optional[float] = None    # base units; None = use the job kerf
 
 
 @dataclass
@@ -208,6 +227,8 @@ class Job:
     marking_tool_diameter: Optional[float] = None  # base units
     outputs: Optional[list] = None  # None = everything available
     profile: Optional[str] = None
+    cut_tool: Optional[str] = None
+    kerf_source: str = "entered"  # "entered" or "preset:<tool>"
     labels: LabelSettings = field(default_factory=LabelSettings)
     spacing_bump: Optional[tuple] = None  # (configured gap, effective gap) when labels raised the spacing
     raw: dict = field(default_factory=dict)
@@ -398,6 +419,21 @@ def _parse_rotation_step(value, ctx: str):
     return step
 
 
+def _resolve_kerf(value, cut_tool: Optional[str], to_base, ctx: str) -> tuple[float, str]:
+    """An explicit kerf always wins; a cut_tool only fills one in. Measuring your own blade
+    beats any table, so an entered value is never questioned."""
+    if value is not None:
+        return to_base(value), "entered"
+    if cut_tool is None:
+        raise JobError(f"{ctx}: missing required field 'kerf'; give it directly, or name a "
+                       f"'cut_tool' to fill it from a preset ({sorted(CUT_TOOL_KERF)})")
+    preset = CUT_TOOL_KERF[cut_tool]
+    if preset is None:
+        raise JobError(f"{ctx}: cut_tool '{cut_tool}' has no preset kerf because its kerf is the "
+                       f"bit; set 'kerf' to the bit diameter")
+    return preset, f"preset:{cut_tool}"
+
+
 def _choice(value: str, allowed: tuple, ctx: str) -> str:
     v = str(value).strip().lower()
     if v not in allowed:
@@ -488,7 +524,10 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
         raise JobError("job: 'cutting_method' is required ('free' or 'guillotine'); it is always asked per job and has no default")
     cutting_method = _choice(raw["cutting_method"], CUTTING_METHODS, "cutting_method")
 
-    kerf = L(_req(raw, "kerf", "job"))
+    cut_tool = raw.get("cut_tool")
+    if cut_tool is not None:
+        cut_tool = _choice(cut_tool, tuple(CUT_TOOL_KERF), "cut_tool")
+    kerf, kerf_source = _resolve_kerf(raw.get("kerf"), cut_tool, L, "job")
     margin = L(_req(raw, "outer_edge_margin", "job"))
     if kerf < 0 or margin < 0:
         raise JobError("kerf and outer_edge_margin must be >= 0")
@@ -584,11 +623,19 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
     for i, rr in enumerate(rods_raw):
         ctx = f"rods[{i}]"
         stock = rr.get("stock_length")
+        rod_tool = rr.get("cut_tool")
+        if rod_tool is not None:
+            rod_tool = _choice(rod_tool, tuple(CUT_TOOL_KERF), f"{ctx}.cut_tool")
+        rod_kerf = None
+        if rr.get("kerf") is not None or rod_tool is not None:
+            rod_kerf, _ = _resolve_kerf(rr.get("kerf"), rod_tool, L, ctx)
         rods.append(Rod(
             id=str(_req(rr, "id", ctx)),
             length=L(_req(rr, "length", ctx)),
             quantity=int(_req(rr, "quantity", ctx)),
             stock_length=L(stock) if stock is not None else None,
+            cut_tool=rod_tool,
+            kerf=rod_kerf,
         ))
 
     isolated = list(raw.get("isolated_groups", []) or [])
@@ -620,6 +667,7 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
         marking_tool_diameter=L(raw["marking_tool_diameter"]) if raw.get("marking_tool_diameter") is not None else None,
         outputs=_parse_outputs(raw.get("outputs")),
         profile=str(profile_name) if profile_name else None,
+        cut_tool=cut_tool, kerf_source=kerf_source,
         labels=_parse_labels(raw, L),
         raw=raw,
     )

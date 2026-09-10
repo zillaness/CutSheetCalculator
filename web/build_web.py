@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 file: build_web.py
-version: 1.4
+version: 1.5
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-10
@@ -49,6 +49,13 @@ def engine_version() -> str:
     return getattr(cutsheet, "__version__", "?")
 
 
+def cut_tool_kerf() -> dict:
+    """Read the preset table off the engine so the page and the engine cannot drift apart."""
+    sys.path.insert(0, os.path.dirname(ENGINE))
+    from cutsheet.model import CUT_TOOL_KERF
+    return dict(CUT_TOOL_KERF)
+
+
 def build(date: str | None = None) -> str:
     with open(os.path.join(HERE, "template.html"), encoding="utf-8") as fh:
         html = fh.read()
@@ -67,6 +74,7 @@ def build(date: str | None = None) -> str:
                 .replace("__ENGINE_ZIP_B64__", engine_zip_b64())
                 .replace("__EXAMPLE_LBRACKET_SVG_B64__", lb)
                 .replace("__EXAMPLE_TROPHY_JOB__", json.dumps(trophy))
+                .replace("__CUT_TOOL_KERF__", json.dumps(cut_tool_kerf()))
                 .replace("__ENGINE_VERSION__", engine_version())
                 .replace("__BUILD_DATE__", date or _dt.date.today().isoformat()))
     return html
@@ -103,5 +111,6 @@ if __name__ == "__main__":
 # v1.1 (2026-09-04): Pyodide 0.27.7.
 # v1.2 (2026-09-05): Engine zip includes subpackages and font files.
 # v1.3 (2026-09-05): Shipped profiles embedded.
+# v1.5 (2026-09-10): Embed the engine's cut-tool kerf presets in the page.
 # v1.4 (2026-09-10): Keep the committed build date when regenerated content is identical,
 #                    so the CI staleness check tracks the engine and not the calendar.
