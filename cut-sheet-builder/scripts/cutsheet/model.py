@@ -1,6 +1,6 @@
 """
 file: model.py
-version: 1.6
+version: 1.8
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-10
@@ -43,6 +43,7 @@ MATERIAL_KINDS = ("sheet", "bar", "roll")
 STOCK_GRAINS = ("none", "width", "height")   # which of the stock's own dimensions the grain runs along
 PART_GRAINS = ("any", "along", "across")     # the part's grain relative to the stock's
 PART_GRAIN_AXES = ("width", "height")        # which of the part's own dimensions carries its grain
+FACTORY_EDGE_POLICIES = ("use-available", "open-sheets")
 
 # Typical kerf by cutting tool, in inches. Starting points to be measured, not truth: blades
 # vary by brand and wear. An explicit "kerf" always wins over anything in here. cnc_router is
@@ -165,10 +166,16 @@ class Part:
     @property
     def grain_axis_resolved(self) -> Optional[str]:
         """Which of the part's own dimensions carries the grain, in base orientation.
-        Defaults to the longer side, because that is what "the grain runs the long way" means
-        on a plank or a panel. A square has no longer side, so it must say."""
+
+        Inferred for typed rectangles only, where the longer side is what "the grain runs the
+        long way" means on a panel. A square has no longer side. An imported outline is not
+        guessed at either: a rule based on its bounding box or its longest segment would be
+        quietly wrong on exactly the irregular shapes it was invented for, and grain is often
+        not what matters on those parts anyway. None means the job has to say."""
         if self.grain_axis is not None:
             return self.grain_axis
+        if not self.is_rectangle:
+            return None
         if abs(self.width - self.height) < 1e-9:
             return None
         return "width" if self.width > self.height else "height"
@@ -222,7 +229,13 @@ class Part:
             # A rectangle gains nothing from angles other than 0/90, and tilted rectangles
             # are useless on a table saw, so keep them axis-aligned in every mode.
             base = float(self.locked_angle) % 360
-            return [base, (base + 90) % 360]
+            quarters = [base, (base + 90) % 360]
+            if self.reference is not None:
+                # Except when the part named an edge. 0 and 180 put the same box in the same
+                # place, but they face its named edges at opposite sides of the sheet, which is
+                # what decides whether a given factory edge or corner can host it at all.
+                quarters += [(base + 180) % 360, (base + 270) % 360]
+            return quarters
         step = self.effective_step(rotation_step)
         if step == FREE_ROTATION:
             step = FREE_COARSE_STEP
@@ -291,6 +304,10 @@ class Job:
     profile: Optional[str] = None
     cut_tool: Optional[str] = None
     materials: dict = field(default_factory=dict)
+    factory_edge_margin: float = 0.0   # a part that was given a factory edge sits flush to it
+    factory_edge_policy: str = "use-available"
+    reference_result: Optional[dict] = None
+    reference_runs: list = field(default_factory=list)  # one entry per stock pass; composed by build_layout
     material_warnings: list = field(default_factory=list)
     kerf_source: str = "entered"  # "entered" or "preset:<tool>"
     labels: LabelSettings = field(default_factory=LabelSettings)
@@ -382,6 +399,15 @@ class Job:
             return stock.factory_edges
         mat = self.material_of(stock)
         return _factory_edge_set(mat.default_factory_edges if mat else "all", "material")
+
+    @property
+    def reference_parts(self) -> list:
+        """Parts asking for a known-straight edge or corner."""
+        return [p for p in self.parts if p.reference is not None]
+
+    @property
+    def uses_reference_edges(self) -> bool:
+        return bool(self.reference_parts) and any(self.stock_factory_edges(st) for st in self.stocks)
 
     @property
     def uses_grain(self) -> bool:
@@ -590,6 +616,19 @@ def _validate_materials(job: "Job") -> None:
         if mid and mid not in job.materials:
             raise JobError(f"{ctx}: unknown material '{mid}'; declared materials: {sorted(job.materials) or 'none'}")
 
+    # Two packing paths cannot place a part flush outside the margin yet, so a reference request
+    # on them is refused up front rather than quietly ignored.
+    if job.reference_parts and any(job.stock_factory_edges(st) for st in job.stocks):
+        if job.cutting_method == "guillotine":
+            raise JobError("factory-edge requests are not supported with guillotine cutting yet: seeding a "
+                           "pre-placed part into the guillotine packer needs a corner-anchored split it does "
+                           "not have. Use cutting_method 'free', or drop the 'reference' fields for now")
+        outline_refs = [p.id for p in job.reference_parts if job.part_mode(p) == "true-outline" and not p.is_rectangle]
+        if outline_refs:
+            raise JobError(f"factory-edge requests are not supported with true-outline nesting yet "
+                           f"({', '.join(outline_refs)}); set nest_mode 'bounding-box' on those parts "
+                           f"or drop their 'reference' fields")
+
     grained_stocks = [st for st in job.stocks if job.stock_grain(st) != "none"]
     for p in job.parts:
         ctx = f"part '{p.id}'"
@@ -618,8 +657,9 @@ def _validate_materials(job: "Job") -> None:
                 f"{ctx} asks for grain '{p.grain}' but no stock declares a grain direction; the requirement is ignored")
             continue
         if p.grain_axis_resolved is None:
-            raise JobError(f"{ctx}: is square, so which way its grain runs cannot be guessed; "
-                           f"set grain_axis to 'width' or 'height'")
+            why = ("is square, so it has no longer side to infer from" if p.is_rectangle
+                   else "is an imported outline, and its grain axis is not guessed from its shape")
+            raise JobError(f"{ctx}: {why}; set grain_axis to 'width' or 'height'")
         for st in grained_stocks:
             sg = job.stock_grain(st)
             if p.allowed_angles(job.rotation_step, job.part_mode(p), sg):
@@ -751,6 +791,11 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
     if "cutting_method" not in raw:
         raise JobError("job: 'cutting_method' is required ('free' or 'guillotine'); it is always asked per job and has no default")
     cutting_method = _choice(raw["cutting_method"], CUTTING_METHODS, "cutting_method")
+
+    fe_margin = L(raw["factory_edge_margin"]) if raw.get("factory_edge_margin") is not None else 0.0
+    if fe_margin < 0:
+        raise JobError("factory_edge_margin must be >= 0")
+    fe_policy = _choice(raw.get("factory_edge_policy", "use-available"), FACTORY_EDGE_POLICIES, "factory_edge_policy")
 
     cut_tool = raw.get("cut_tool")
     if cut_tool is not None:
@@ -907,6 +952,7 @@ def job_from_dict(raw: dict, base_dir: str = ".") -> Job:
         outputs=_parse_outputs(raw.get("outputs")),
         profile=str(profile_name) if profile_name else None,
         cut_tool=cut_tool, kerf_source=kerf_source, materials=materials,
+        factory_edge_margin=fe_margin, factory_edge_policy=fe_policy,
         labels=_parse_labels(raw, L),
         raw=raw,
     )
@@ -968,3 +1014,9 @@ def parts_table(job: Job) -> list[dict[str, Any]]:
 # v1.2 (2026-09-04): engrave geometry from import travels with the part (transform_like).
 # v1.3 (2026-09-04): Stock list ('sheets') with quantities, priority order.
 # v1.4 (2026-09-05): machine, marking_tool_diameter, outputs, profile, labels (job and per part), spacing bump.
+# v1.5 (2026-09-10): cut_tool kerf presets; per-rod tool/kerf.
+# v1.6 (2026-09-10): materials, stock factory edges, part reference/banded edges, grain as a rotation filter.
+# v1.7 (2026-10-02): Grain axis is inferred for typed rectangles only; outlines must declare it.
+# v1.8 (2026-10-02): factory_edge_margin and factory_edge_policy settings; a rectangle with a
+#                    reference request is offered all four quarter turns, since they face its
+#                    named edges at different sheet edges.

@@ -1,6 +1,6 @@
 """
 file: report.py
-version: 1.4
+version: 1.5
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-10
@@ -121,6 +121,31 @@ def cut_list_md(layout: Layout, filename: str, outputs: list[str]) -> str:
             else:
                 L.append(f"Continuous length required: {U.fmt(r['continuous_length'], du)} (no stock length given).\n\n")
 
+    rr = getattr(job, "reference_result", None)
+    if rr:
+        L.append("## Factory edges\n\n")
+        L.append(f"Policy: `{rr['policy']}`. "
+                 f"{len(rr['satisfied'])} placement(s) sit flush on a factory edge, "
+                 f"{len(rr['downgraded'])} did not.\n\n")
+        if rr["satisfied"]:
+            L.append("| Part | Copy | Stock side(s) | Corner | Angle |\n|---|---|---|---|---|\n")
+            for e in rr["satisfied"]:
+                L.append(f"| {e['part']} | {e['copy']} | {', '.join(e['sides'])} | "
+                         f"{'yes' if e['corner'] else 'no'} | {e['angle']:g} deg |\n")
+            L.append("\n")
+        if rr["downgraded"]:
+            names = ", ".join(f"{e['part']}#{e['copy']}" for e in rr["downgraded"][:12])
+            L.append(f"Placed without a factory edge: {names}"
+                     + (" ..." if len(rr["downgraded"]) > 12 else "") + "\n\n")
+            n = rr.get("one_more_sheet_would_satisfy") or 0
+            if n:
+                L.append(f"One more sheet of {rr['stock']} would give {n} of them a factory edge. "
+                         f"This policy will not open it for you; set `factory_edge_policy` to "
+                         f"`open-sheets` if that trade is worth it.\n\n")
+            else:
+                L.append("Another sheet would not help: the requests that are left cannot take a "
+                         "factory edge on this stock at all.\n\n")
+
     lr = layout.label_report
     if lr is not None and lr.enabled:
         L.append("## Labels\n\n")
@@ -195,6 +220,7 @@ def layout_json(layout: Layout, filename: str) -> str:
         "materials": {m.id: {"kind": m.kind, "grain": m.grain, "thickness": m.thickness,
                              "banding_thickness": m.banding_thickness} for m in job.materials.values()},
         "material_warnings": job.material_warnings,
+        "reference_edges": getattr(job, "reference_result", None),
         "kerf": job.kerf, "cut_tool": job.cut_tool, "kerf_source": job.kerf_source,
         "outer_edge_margin": job.outer_edge_margin, "part_spacing_mode": job.part_spacing_mode, "gap": job.gap,
         "cutting_method": job.cutting_method, "nest_mode": job.nest_mode,

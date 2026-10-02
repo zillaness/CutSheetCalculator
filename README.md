@@ -1,6 +1,6 @@
 ---
 file: README.md
-version: 1.5
+version: 1.6
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-10
@@ -74,7 +74,7 @@ outline) or beside the cutout (in the waste). Text size follows the machine (`ma
 laser raster, single-line strokes for routers. Labels that cannot fit fall back and the
 validation report lists every one. Machine profiles in `cut-sheet-builder/assets/profiles/`
 hold shop defaults; reference one with `"profile": "router_1_8"`. Details:
-`cut-sheet-builder/references/job_schema_v1.6.md` and `docs/piece_labeling_prd_v1.2.md`.
+`cut-sheet-builder/references/job_schema_v1.7.md` and `docs/piece_labeling_prd_v1.2.md`.
 
 ## Materials and grain
 
@@ -88,11 +88,17 @@ when the job loads rather than discovered at the saw: a square with no declared 
 locked rotation that fights the grain, a rotation step with no compliant angle. The validation
 report proves every placed piece honors its grain.
 
-Parts name the edges that must land on known-straight stock with `reference`. A rectangle
+Parts name the edges that must land on known-straight stock with `reference`, and the packer
+places them flush to that edge, outside the normal margin, while every ordinary part stays
+inside it. Corner requests are served first, since a sheet has only four corners. When more
+parts want an edge than the sheets have, `factory_edge_policy` decides: the default never opens
+a sheet for an edge and tells you what one more would fix, or `open-sheets` keeps opening them.
+Guillotine cutting and true-outline nesting of irregular reference parts are refused at load
+time for now rather than quietly ignored. A rectangle
 answers to `left`/`right`/`top`/`bottom`; an imported outline answers to the index of a straight
 run, because a shape with no top side has nothing honest to call "top". Stock declares which of
 its own sides are still factory with `factory_edges`, so an offcut can be described truthfully.
-Details: `cut-sheet-builder/references/job_schema_v1.6.md`.
+Details: `cut-sheet-builder/references/job_schema_v1.7.md`.
 
 ## Kerf presets
 
@@ -102,7 +108,7 @@ starting points, not truth: set `kerf` yourself once you have measured your own 
 wins without complaint. A CNC router has no preset because its kerf is the bit. Rods take
 their own `cut_tool`, since bar stock is often cut on a different saw than sheet goods. The
 cut list names the kerf and where it came from. Details:
-`cut-sheet-builder/references/job_schema_v1.6.md`.
+`cut-sheet-builder/references/job_schema_v1.7.md`.
 
 ## Engines
 

@@ -148,6 +148,24 @@ def test_an_outline_keeps_the_end_for_end_flip_a_locked_rotation_would_deny():
     assert sorted(job.parts[0].allowed_angles(90, "true-outline", "width")) == [0.0, 180.0]
 
 
+def test_an_outline_must_declare_its_grain_axis():
+    """No inference on irregular shapes: a bounding-box or longest-segment rule would be
+    quietly wrong on exactly the parts it was invented for."""
+    import os
+    from conftest import EXAMPLES
+    src = {"type": "file", "path": os.path.join(EXAMPLES, "l_bracket_v1.0.svg")}
+    with pytest.raises(JobError) as e:
+        _job([{"id": "A", "quantity": 1, "material": "ply", "grain": "along", "source": src}],
+             materials=[PLY], sheets=[{"width": 96, "height": 48, "material": "ply"}],
+             nest_mode="true-outline")
+    assert "imported outline" in str(e.value) and "grain_axis" in str(e.value)
+    ok = _job([{"id": "A", "quantity": 1, "material": "ply", "grain": "along",
+                "grain_axis": "width", "source": src}],
+              materials=[PLY], sheets=[{"width": 96, "height": 48, "material": "ply"}],
+              nest_mode="true-outline")
+    assert ok.parts[0].grain_axis_resolved == "width"
+
+
 def test_grain_axis_defaults_to_the_longer_side():
     job = _job([{"id": "wide", "width": 30, "height": 10, "quantity": 1},
                 {"id": "tall", "width": 10, "height": 30, "quantity": 1}])
@@ -159,7 +177,7 @@ def test_a_square_must_say_which_way_its_grain_runs():
     with pytest.raises(JobError) as e:
         _job([{"id": "S", "width": 12, "height": 12, "quantity": 1, "material": "ply", "grain": "along"}],
              materials=[PLY], sheets=[{"width": 96, "height": 48, "material": "ply"}])
-    assert "square" in str(e.value) and "grain_axis" in str(e.value)
+    assert "no longer side" in str(e.value) and "grain_axis" in str(e.value)
     ok = _job([{"id": "S", "width": 12, "height": 12, "quantity": 1, "material": "ply",
                 "grain": "along", "grain_axis": "width"}],
               materials=[PLY], sheets=[{"width": 96, "height": 48, "material": "ply"}])

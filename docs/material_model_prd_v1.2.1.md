@@ -1,6 +1,6 @@
 ---
-file: material_model_prd_v1.1.md
-version: 1.1.1
+file: material_model_prd_v1.2.1.md
+version: 1.2.1
 author: Sam Cao
 created: 2026-09-10
 last_updated: 2026-09-10
@@ -200,9 +200,23 @@ Parts with a `reference` requirement are **pre-placed** before the general pack:
    (corner requirements first, since corners are scarcer, then by descending area, then by id
    and copy index).
 2. Assign each to an available factory edge or corner on the current stock, anchored flush to
-   it. Margin on a factory edge defaults to `factory_edge_margin` (default 0, because the
-   whole point is that the edge is already good), while every sawn edge keeps
-   `outer_edge_margin`. So margin becomes per-edge internally, derived, not a new user dial.
+   it, sitting **flush**: `factory_edge_margin` defaults to 0, because the whole point of
+   choosing that edge is not cutting it. A job can raise it when the stock showed up dinged.
+
+   The flush margin applies to **an assigned reference placement**, not to the sheet boundary
+   at large. This distinction is load-bearing and easy to get backwards. Deriving a per-edge
+   sheet margin from `factory_edges` would be a tidier-looking design, and it would be wrong:
+   `factory_edges` describes what the stock is, not permission to put anything there, so a
+   job that merely names its material would silently move every part flush to the sheet edge
+   and lose the damaged-edge protection `outer_edge_margin` exists to provide. Only a part
+   that asked for that edge, and got it, sits outside the normal margin.
+
+   Mechanically that means a sheet carrying reference placements cannot be packed as "the
+   usable region inset by one margin," because reference parts live outside that inset. Such
+   a sheet is packed as the **whole sheet**, seeded with the reference placements at their
+   flush anchors and then with margin-strip blockers along each side, so every ordinary part
+   still stays inside `outer_edge_margin`. A sheet with no reference placements takes the
+   existing path untouched, which is what keeps old jobs byte-identical.
 3. Hand the remaining free region to the existing packers, which then fill around the
    pre-placed pieces.
 
@@ -222,18 +236,37 @@ Consequences to accept openly:
   conflict.
 
 **Over-subscription** is the normal case, not the edge case: twelve parts want a factory edge
-and the sheet has four. The chain, every step disclosed: satisfy in the sorted order above,
-open a new sheet if stock allows and the remaining demand justifies it, then downgrade the
-rest to ordinary placement and list every downgraded piece with its id, copy number, and the
-reason. A `reference.required: true` flag turns the downgrade into an error for parts where an
-ordinary edge is genuinely unacceptable.
+and the sheet has four. The v1.0 draft said the packer would open a new sheet "if the remaining
+demand justifies it," which is not a rule. It is now a job setting, `factory_edge_policy`:
+
+| Mode | Behavior |
+|---|---|
+| `use-available` (default) | Never open a sheet just for a reference edge. Spend the factory edges on sheets that get opened anyway, downgrade the rest, and **recommend** in the report how many more requests one additional sheet would satisfy |
+| `open-sheets` | Keep opening sheets while unmet reference demand remains, bounded by available stock |
+
+`use-available` is the default because it never spends material without being asked, and the
+recommendation makes the alternative a one-line change rather than a surprise. It also composes
+with the existing offcuts-first stock order: an offcut that still has two factory edges gets
+them used up before a full sheet is opened, which is the behavior worth having.
+
+`reference.required: true` is the override in both modes: that part is satisfied or the run
+fails. It is the single lever that can cost material under `use-available`.
+
+Every outcome is disclosed per piece: satisfied, downgraded with a reason, or failed.
 
 ### 7.4 Grain
 
 Stock (through its material) declares a grain axis. A part declares
 `grain: "along" | "across" | "any"`, meaning the part's own grain axis relative to the stock's.
-The part's own axis in its base orientation defaults to its height (long dimension of a typed
-rectangle in base orientation) and is overridable with `grain_axis`.
+The part's own grain axis is set with `grain_axis`. **It is inferred only for typed
+rectangles**, where it defaults to the longer side, since "the grain runs the long way" is what
+that means on a panel. An imported outline must declare it.
+
+The reason not to infer harder is that grain is often not the point: on many jobs what matters
+is packing density, and plenty of plywood is mixed grain anyway. Guessing an axis from an
+irregular shape's bounding box or its longest segment would be a clever rule that is quietly
+wrong on exactly the shapes it was invented for. A part that cares enough about grain to declare
+it can say which way it runs.
 
 Implementation is a filter inside `Part.allowed_angles`:
 
@@ -248,6 +281,8 @@ nothing, so for rectangles a grain requirement simply picks one of the two.
 
 Interactions, all resolved at load time rather than at pack time:
 
+- An imported outline with a grain requirement and no `grain_axis`: hard error. A typed square
+  likewise, since it has no longer side to infer from.
 - Grain plus `rotation: "locked"` where the locked angle violates grain: hard error naming
   both fields.
 - Grain plus a `rotation_step` whose grid contains no compliant angle: hard error.
@@ -288,9 +323,17 @@ the origin, but "biases" is not "guarantees." Roll mode adds run length as the *
 score term so a placement that extends the roll always loses to one that does not, and
 verification asserts that no gap along the roll axis exceeds the largest unplaced part.
 
-Reporting: consumed length in the display unit, and always additionally in yards and meters,
-because that is how roll goods are bought. This needs a display-only yard conversion in
-`units.py`; `yd` does not become a job input unit.
+Reporting gives three numbers, because they answer three different questions:
+
+1. **Consumed**: the exact run length the layout needs, in the display unit plus yards and
+   metres, because that is how roll goods are bought. This needs a display-only yard conversion
+   in `units.py`; `yd` does not become a job input unit.
+2. **Buy**: consumed rounded up to the next whole unit, since a supplier cuts in whole yards or
+   metres rather than to four decimal places.
+3. **Recommended**: buy plus a `waste_allowance` for trim, handling damage, and the mistake you
+   have not made yet. **Default 10 percent**, rounded up to the next whole unit, settable per
+   material or per job. Ten percent is a starting point in the same spirit as the kerf presets,
+   not a measured truth, and the report labels it as an allowance rather than a requirement.
 
 Nap is grain. Directional vinyl reuses 7.4 with no new concept, which is the argument for
 doing grain before roll. **Roll material defaults to `grain: "none"`**, because most roll goods
@@ -396,6 +439,20 @@ above; they are recorded here with what changed.
    grain, since most roll goods have none. See 7.5.
 4. **Banding on imported outlines.** **Answered: rectangles only in v1.** See 7.6.
 
+A second round of questions came out of building item 1, answered 2026-10-02:
+
+5. **Factory-edge over-subscription.** The draft's "open a sheet if demand justifies it" was
+   not a rule. **Answered: make it a setting**, with `use-available` recommending a new sheet
+   rather than opening one, and `open-sheets` for when you want the edges filled. See 7.3.
+6. **Margin on a factory edge.** **Answered: zero, flush to the edge.** See 7.3.
+7. **Grain axis on imported outlines.** **Answered: infer only for rectangles; outlines
+   declare.** Recorded as read from "longest segment but only for rectangles" together with the
+   point that grain is often not what matters, and that mixed-grain plywood exists. The upshot
+   is no inference on irregular shapes at all. See 7.4.
+8. **Roll length reporting.** **Answered: exact, rounded up to the next whole unit, plus a
+   recommended allowance for waste and mistakes.** The 10 percent default is this PRD's pick,
+   not a stated number. See 7.5.
+
 ## 8. Scope by phase
 
 **v1 (this PRD, in build order)**
@@ -482,6 +539,16 @@ above; they are recorded here with what changed.
     whether rotating would fit. With grain declared across the roll, the message says the
     rotation is not allowed.
 17. Outline part with banded edges: load-time error naming the part (rectangles only in v1).
+18. Over-subscribed factory edges under `use-available`: no extra sheet is opened, the surplus
+    is downgraded, and the report recommends how many more one sheet would satisfy. The same job
+    under `open-sheets` opens sheets until demand is met or stock runs out.
+19. A `required: true` reference that cannot be satisfied fails the run under both policies.
+20. A part on a factory edge sits flush: its edge coordinate equals the sheet edge, while parts
+    on sawn edges keep `outer_edge_margin`.
+21. Imported outline with grain and no `grain_axis`: load-time error. The same outline with
+    `grain_axis` declared packs fine.
+22. Roll report gives consumed, buy (next whole unit), and recommended (allowance applied), and
+    buy is never less than consumed.
 
 ## 12. Decisions
 
@@ -501,9 +568,19 @@ above; they are recorded here with what changed.
    Confirmed 2026-09-10.
 10. Banding is rectangles-only in v1. Confirmed 2026-09-10.
 11. All three PRDs land on one branch rather than a branch per PRD. Confirmed 2026-09-10.
+12. `factory_edge_policy` is a job setting, defaulting to `use-available`, which recommends
+    rather than opens sheets. Confirmed 2026-10-02.
+13. `factory_edge_margin` defaults to 0: a part on a factory edge sits flush. Confirmed
+    2026-10-02.
+14. Grain axis is inferred for typed rectangles only. Imported outlines declare it. Confirmed
+    2026-10-02.
+15. Roll reporting gives consumed, buy, and recommended-with-allowance; allowance defaults to
+    10 percent. Confirmed 2026-10-02 apart from the specific percentage, which is this PRD's.
 
 ## CHANGELOG
 - v1.0 (2026-09-10): Initial draft for sign-off.
 - v1.0.1 (2026-09-10): Mark build item 2 (kerf presets) as built; the rest still awaits sign-off.
+- v1.2.1 (2026-10-02): Spell out that the flush factory-edge margin applies to an assigned reference placement, not to the sheet boundary; add the whole-sheet-plus-blockers packing note that follows from it.
+- v1.2 (2026-10-02): Second review round. factory_edge_policy setting replaces the draft's unstated open-a-sheet rule; factory_edge_margin defaults to 0 (flush); grain axis inferred for rectangles only; roll reports consumed, buy, and recommended with a 10 percent default allowance; five acceptance tests added.
 - v1.1.1 (2026-09-10): Correct the 180-flip claim in 7.4: it holds for outlines, and is vacuous for rectangles, which are never offered 180.
 - v1.1 (2026-09-10): Signed off. Segment-based reference-edge addressing replaces bounding-box sides; grain cost reporting on by default with per-part attribution; roll defaults to no grain and errors with a rotation suggestion; banding is rectangles-only in v1; five acceptance tests added.

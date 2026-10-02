@@ -1,6 +1,6 @@
 """
 file: verify.py
-version: 1.4
+version: 1.5
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -133,13 +133,19 @@ def check_geometry(layout: Layout, rep: Report):
     half = gap / 2
     m = job.outer_edge_margin
 
-    # Boundary, against each placement's own sheet size
+    # Boundary, against each placement's own sheet size. A part that was given a factory edge
+    # sits flush to it, outside this margin on purpose, and is checked separately below.
+    on_factory = _reference_keys(job)
     outside = []
     for s in layout.sheets:
         usable = box(m, m, s.width - m, s.height - m).buffer(1e-7)
-        outside += [pl.key for pl in s.placements if not usable.covers(pl.polygon)]
+        outside += [pl.key for pl in s.placements
+                    if pl.key not in on_factory and not usable.covers(pl.polygon)]
+    note = f"all {len(layout.placements) - len(on_factory)} parts within {m:g} in of no sheet edge"
+    if on_factory:
+        note += f"; {len(on_factory)} on a factory edge checked flush instead"
     rep.add("inside outer_edge_margin boundary", not outside,
-            f"all {len(layout.placements)} parts within {m:g} in of no sheet edge" if not outside else f"outside: {outside[:10]}")
+            note if not outside else f"outside: {outside[:10]}")
 
     # Overlaps, per sheet
     overlaps = []
@@ -316,6 +322,46 @@ def check_engine(layout: Layout, rep: Report):
         rep.add("nesting engine", True, used)
 
 
+def _reference_keys(job) -> set:
+    """Keys of placements that were granted a factory edge, so the margin check can skip them."""
+    rr = getattr(job, "reference_result", None) or {}
+    return {f"{e['part']}#{e['copy']}" for e in rr.get("satisfied", [])}
+
+
+def check_reference_edges(layout: Layout, rep: Report):
+    """A granted factory edge has to actually be one: the right side of the right stock, with
+    the part flush against it. Otherwise the request was decorative."""
+    job = layout.job
+    rr = getattr(job, "reference_result", None)
+    if not rr:
+        return
+    by_stock = {st.label: st for st in job.stocks}
+    want = {(e["part"], e["copy"]): e for e in rr["satisfied"]}
+    fm = job.factory_edge_margin
+    bad = []
+    for sh in layout.sheets:
+        stock = by_stock.get(sh.stock)
+        declared = job.stock_factory_edges(stock) if stock else frozenset()
+        for pl in sh.placements:
+            e = want.get((pl.part_id, pl.index))
+            if e is None:
+                continue
+            x0, y0, x1, y1 = pl.x, pl.y, pl.x + pl.w, pl.y + pl.h
+            at = {"left": abs(x0 - fm), "top": abs(y0 - fm),
+                  "right": abs(sh.width - fm - x1), "bottom": abs(sh.height - fm - y1)}
+            for side in e["sides"]:
+                if side not in declared:
+                    bad.append(f"{pl.key} given '{side}' which sheet {sh.index + 1} does not declare factory")
+                elif at[side] > 1e-6:
+                    bad.append(f"{pl.key} is {at[side]:.4f} in off the {side} edge of sheet {sh.index + 1}")
+
+    n_corner = sum(1 for e in rr["satisfied"] if e["corner"])
+    detail = (f"{len(rr['satisfied'])} placement(s) flush on a declared factory edge "
+              f"({n_corner} on a corner); {len(rr['downgraded'])} downgraded under policy "
+              f"'{rr['policy']}'") if not bad else "; ".join(bad[:6])
+    rep.add("factory edges", not bad, detail, flagged=bool(rr["downgraded"]))
+
+
 def check_materials(layout: Layout, rep: Report):
     """Prove the grain requirement in the output rather than trusting the packer to have kept it."""
     job = layout.job
@@ -361,6 +407,7 @@ def verify(layout: Layout, reference_svg: Optional[str] = None, determinism: boo
     check_labels(layout, rep)
     check_engine(layout, rep)
     check_materials(layout, rep)
+    check_reference_edges(layout, rep)
     if determinism and layout.placements:
         check_determinism(layout, rep)
     return rep
@@ -372,3 +419,4 @@ def verify(layout: Layout, reference_svg: Optional[str] = None, determinism: boo
 # v1.2 (2026-09-04): Per-sheet boundary/area; stock quantity check.
 # v1.3 (2026-09-05): Label checks (height, outcomes, inside-part, clearance, spacing bump).
 # v1.4 (2026-09-10): Grain compliance check and material warnings.
+# v1.5 (2026-10-02): Factory-edge flushness check; the margin check skips granted reference placements.

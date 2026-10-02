@@ -1,6 +1,6 @@
 """
 file: pack_rect.py
-version: 1.2
+version: 1.3
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-04
@@ -131,13 +131,35 @@ class GuillotineBin:
         self.used.append(r)
 
 
-def _pack_bundled(items: list[Item], bin_w: float, bin_h: float, guillotine: bool, max_bins=None) -> tuple[list, list]:
+def _pack_bundled(items: list[Item], bin_w: float, bin_h: float, guillotine: bool, max_bins=None,
+                  on_open_bin=None, drain_seeds: bool = False, pending_seeds=None) -> tuple[list, list]:
     """Returns ([(item, bin_index, rect(inflated), angle)], unplaced_items). Opens a new bin only when nothing
-    open fits, and never more than max_bins (None = unlimited); items that cannot be placed are returned."""
+    open fits, and never more than max_bins (None = unlimited); items that cannot be placed are returned.
+
+    on_open_bin(bin_index) is called each time a bin is created and may claim space in it before
+    any ordinary item lands: it returns [(item_or_None, Rect, angle)] to mark as used. An entry
+    whose item is None is a blocker, space held back rather than a part (the outer-edge margin
+    strips, when reference parts put the bin in whole-sheet coordinates)."""
     bins = []
     out = []
     unplaced = []
+
+    claimed: set = set()
+
+    def open_bin():
+        b = GuillotineBin(bin_w, bin_h) if guillotine else MaxRectsBin(bin_w, bin_h)
+        bins.append(b)
+        if on_open_bin is not None:
+            for (seed_item, r, a) in on_open_bin(len(bins) - 1):
+                b.place(r)
+                if seed_item is not None:
+                    out.append((seed_item, len(bins) - 1, r, a))
+                    claimed.add(id(seed_item))
+        return b
+
     for it in items:
+        if id(it) in claimed:
+            continue   # a bin that opened earlier already claimed this one for a factory edge
         if not it.options:
             unplaced.append(it)
             continue
@@ -150,8 +172,9 @@ def _pack_bundled(items: list[Item], bin_w: float, bin_h: float, guillotine: boo
             if max_bins is not None and len(bins) >= max_bins:
                 unplaced.append(it)
                 continue
-            b = GuillotineBin(bin_w, bin_h) if guillotine else MaxRectsBin(bin_w, bin_h)
-            bins.append(b)
+            b = open_bin()
+            if id(it) in claimed:
+                continue   # opening that bin seeded this very item onto a factory edge
             cand = b.best(it.options)
             if cand is None:
                 bins.pop()
@@ -167,6 +190,14 @@ def _pack_bundled(items: list[Item], bin_w: float, bin_h: float, guillotine: boo
             _, r, a = cand
             b.place(r)
         out.append((it, bi, r, a))
+
+    # open-sheets policy: keep opening sheets while factory-edge demand is unmet.
+    while drain_seeds and pending_seeds is not None and pending_seeds() and (max_bins is None or len(bins) < max_bins):
+        before = len(out)
+        open_bin()
+        if len(out) == before:
+            bins.pop()   # the seeder could not use a fresh sheet either; stop rather than spin
+            break
     return out, unplaced
 
 
@@ -206,9 +237,16 @@ def _pack_rectpack(items: list[Item], bin_w: float, bin_h: float, guillotine: bo
 
 
 def pack_rectangles(job: Job, instances: list[Instance], engine: str = "auto", sheet_w=None, sheet_h=None,
-                    max_sheets=None, stock_grain=None) -> tuple[list[Placement], str, Optional[str], list[Instance]]:
+                    max_sheets=None, stock_grain=None, stock=None,
+                    reference_pool=None) -> tuple[list[Placement], str, Optional[str], list[Instance]]:
     """Bounding-box packing of instances onto sheets of (sheet_w, sheet_h) (default: the job's first stock),
-    opening at most max_sheets. Returns (placements, engine_name, fallback_note, unplaced_instances)."""
+    opening at most max_sheets. Returns (placements, engine_name, fallback_note, unplaced_instances).
+
+    reference_pool, when given, is a mutable list of instances wanting a factory edge. Each sheet
+    that opens takes as many as it can hold, flush to the stock edge, and they are removed from
+    the pool. Those sheets are packed in whole-sheet coordinates with margin blockers rather than
+    in the usual margin-inset region, because a reference part legitimately sits outside the
+    margin while every ordinary part must stay inside it."""
     gap = job.gap
     guillotine = job.cutting_method == "guillotine"
     sheet_w = job.sheet_width if sheet_w is None else sheet_w
@@ -229,12 +267,59 @@ def pack_rectangles(job: Job, instances: list[Instance], engine: str = "auto", s
                 opts.append((w + gap, h + gap, a))
         items.append(Item(inst, opts))  # no options -> reported as unplaced (may fit a later, larger stock)
 
-    bin_w, bin_h = usable_w + gap, usable_h + gap
+    use_reference = bool(reference_pool) and stock is not None and bool(job.stock_factory_edges(stock))
+    if use_reference:
+        # Whole-sheet coordinates: reference parts sit flush to the stock edge, outside the margin.
+        bin_w, bin_h = sheet_w + gap, sheet_h + gap
+        origin = 0.0
+    else:
+        bin_w, bin_h = usable_w + gap, usable_h + gap
+        origin = job.outer_edge_margin
     fallback = None
     used = None
     result = None
+    seeded: list[tuple] = []
+
+    on_open_bin = None
+    ref_items: list[Item] = []
+    if use_reference:
+        from .reference import plan_sheet
+        ref_items = [it for it in items if it.inst.part.reference is not None]
+        by_key = {(it.inst.part.id, it.inst.index): it for it in ref_items}
+
+        # Hold reference items back to the end of the ordinary queue. Each sheet seeds them as
+        # it opens, so a part that misses an edge on this sheet still gets a shot at the next
+        # one that opens anyway. Only a request no sheet can host falls through to ordinary
+        # placement, and it does so last. Stable, so the order stays deterministic.
+        items.sort(key=lambda it: it.inst.part.reference is not None)
+
+        def pending_seeds():
+            return bool(ref_items)
+
+        def on_open_bin(_bin_index):
+            got, left = plan_sheet(job, stock, [it.inst for it in ref_items], gap)
+            placed_keys = {(a.inst.part.id, a.inst.index) for a in got}
+            ref_items[:] = [it for it in ref_items
+                            if (it.inst.part.id, it.inst.index) not in placed_keys]
+            out = []
+            for a in got:
+                out.append((by_key[(a.inst.part.id, a.inst.index)],
+                            Rect(a.x, a.y, a.w + gap, a.h + gap), a.angle))
+                seeded.append(a)
+            # Hold back the outer-edge margin so ordinary parts stay inside it. Done after the
+            # reference parts, whose space is already claimed, so the strips only take what is left.
+            m = job.outer_edge_margin
+            if m > 0:
+                out += [(None, Rect(0, 0, m, bin_h), 0.0),
+                        (None, Rect(0, 0, bin_w, m), 0.0),
+                        (None, Rect(sheet_w - m + gap, 0, m, bin_h), 0.0),
+                        (None, Rect(0, sheet_h - m + gap, bin_w, m), 0.0)]
+            return out
     unplaced_items: list[Item] = []
-    if engine in ("auto", "rectpack"):
+    if use_reference and engine == "rectpack":
+        raise ValueError("engine 'rectpack' cannot honor factory-edge requests: it takes bin dimensions "
+                         "only and cannot be given pre-claimed space. Use engine 'auto' or 'bundled'")
+    if not use_reference and engine in ("auto", "rectpack"):
         try:
             result, unplaced_items = _pack_rectpack(items, bin_w, bin_h, guillotine, max_sheets)
             used = "rectpack (" + ("GuillotineBafSas" if guillotine else "MaxRectsBssf") + ")"
@@ -247,16 +332,34 @@ def pack_rectangles(job: Job, instances: list[Instance], engine: str = "auto", s
                 raise
             fallback = f"rectpack could not handle this job ({ex}); used the bundled packer instead"
     if result is None:
-        result, unplaced_items = _pack_bundled(items, bin_w, bin_h, guillotine, max_sheets)
+        result, unplaced_items = _pack_bundled(
+            items, bin_w, bin_h, guillotine, max_sheets, on_open_bin,
+            drain_seeds=use_reference and job.factory_edge_policy == "open-sheets",
+            pending_seeds=(pending_seeds if use_reference else None))
         used = "bundled " + ("guillotine (best-area-fit, larger-leftover split)" if guillotine else "MaxRects (best-short-side-fit)")
 
+    if use_reference:
+        fallback = ("factory-edge requests put this stock in whole-sheet coordinates, so rectpack was not "
+                    "eligible (it cannot be given pre-claimed space); used the bundled packer")
     placements = []
-    m = job.outer_edge_margin
     for (it, bi, r, a) in result:
-        x, y = m + r.x, m + r.y
+        x, y = origin + r.x, origin + r.y
         w, h = r.w - gap, r.h - gap
         poly = placed_polygon(it.inst.part, x, y, a)
         placements.append(Placement(it.inst.part.id, it.inst.index, bi, x, y, a, w, h, poly))
+    if use_reference:
+        from .reference import would_fit_on_one_more_sheet
+        # One entry per stock pass. build_layout composes them, because a request this stock
+        # could not host may still get an edge on the next stock in the list.
+        recommend = 0
+        if ref_items and job.factory_edge_policy == "use-available":
+            recommend = would_fit_on_one_more_sheet(job, stock, [it.inst for it in ref_items], gap)
+        job.reference_runs.append({
+            "satisfied": [{"part": a.inst.part.id, "copy": a.inst.index, "sides": list(a.sides),
+                           "corner": a.corner, "angle": a.angle} for a in seeded],
+            "one_more_sheet_would_satisfy": recommend,
+            "stock": stock.label,
+        })
     return placements, used, fallback, [it.inst for it in unplaced_items]
 
 
@@ -296,4 +399,5 @@ def is_guillotine_cuttable(rects: list[tuple[float, float, float, float]], tol: 
 # CHANGELOG
 # v1.0 (2026-09-04): Initial release.
 # v1.2 (2026-09-10): Grain of the current stock filters the angle options.
+# v1.3 (2026-10-02): Bin-seeding hook; factory-edge reference placements in whole-sheet coordinates with margin blockers.
 # v1.1 (2026-09-04): Sheet size and sheet cap parameters; unplaced instances returned instead of raising.

@@ -1,6 +1,6 @@
 ---
-file: job_schema_v1.6.md
-version: 1.6
+file: job_schema_v1.7.md
+version: 1.7
 author: Sam Cao
 created: 2026-09-04
 last_updated: 2026-09-10
@@ -23,6 +23,8 @@ starting with `_` (metadata, changelog) are ignored by the engine.
 | `sheets` | alternative to `sheet` | list of the above, each with optional `quantity` | Used in list order: offcuts first, full sheets last. Every entry except the last needs a `quantity`; the last is unlimited. A part too big for an early stock falls through to a later one. Running out of stock is an error |
 | `outer_edge_margin` | yes | number >= 0 | Sheet boundary to nearest part |
 | `kerf` | yes, unless `cut_tool` supplies one | number >= 0 | Cut width. An explicit value always wins over a preset |
+| `factory_edge_margin` | no | number >= 0, default 0 | Gap left between a part that was **given** a factory edge and that edge. Zero means flush, which is the point of choosing the edge. Raise it if the stock arrived dinged. Does not change the sheet margin for ordinary parts |
+| `factory_edge_policy` | no | `use-available` (default) or `open-sheets` | What to do when more parts want a factory edge than the sheets have. `use-available` never opens a sheet for an edge and instead recommends what one more would fix; `open-sheets` keeps opening sheets until demand is met or stock runs out |
 | `cut_tool` | no | `table_saw`, `table_saw_thin`, `miter_saw`, `circular_saw`, `track_saw`, `jigsaw`, `band_saw`, `cnc_router`, `laser`, `plasma`, `waterjet` | Fills `kerf` from a preset when the job does not state one. Separate from `machine`: a job can be cut on a table saw and labeled by hand. `cnc_router` has no preset because its kerf is the bit |
 | `part_spacing` | no | `{ "mode": "kerf-gap" }` (default), `{ "mode": "shared-edge" }`, `{ "mode": "custom-margin", "value": 0.5 }` | Gap between adjacent parts; independent of `outer_edge_margin` |
 | `cutting_method` | **yes, no default** | `free` or `guillotine` | Guillotine packs bounding boxes so every sheet separates with full cuts |
@@ -140,6 +142,37 @@ Typed rectangles rotate only 0/90 in every mode.
 
 Rod math: `n * length + (n - 1) * kerf`. Bars packed first-fit-decreasing.
 
+## Factory edges
+
+A part names the edges it needs on known-straight stock; the packer decides which stock edge or
+corner each one gets, and places the part **flush** there, outside the normal
+`outer_edge_margin`. Every ordinary part still stays inside that margin.
+
+How a request is served:
+
+- Corner requests are assigned first, since a sheet has only four corners and they are the
+  scarcer resource. Then the largest parts, then by id and copy so a rerun matches.
+- One part per corner. Several parts can share one long edge, allocated along its length.
+- A part gets turned if that is what puts the named edge against an available stock side. A
+  rectangle carrying a reference request is offered all four quarter turns rather than the usual
+  two, because 0 and 180 put the same box in the same place while facing its named edges at
+  opposite sides of the sheet.
+- A request that no sheet can host is placed as an ordinary part and listed as downgraded, with
+  the reason, in the validation report and the cut list. `reference.required: true` makes that a
+  failure instead.
+- Reference requests are served last in the packing queue, so a part that misses an edge on one
+  sheet still gets a shot at the next sheet that opens anyway rather than being stranded
+  mid-sheet.
+
+Not supported yet, and refused at load time rather than quietly ignored: **guillotine** cutting
+(seeding a pre-placed part into the guillotine packer needs a corner-anchored split it does not
+have) and **true-outline** nesting of a non-rectangular reference part. `rectpack` is also
+ineligible, since it takes bin dimensions only and cannot be given pre-claimed space; forcing it
+is an error, and `auto` falls to the bundled packer with a note.
+
+The validation report proves each granted edge: that the stock declares that side factory, and
+that the part is actually flush against it.
+
 ## Grain
 
 `grain` is a rotation constraint, not an engineering claim. `along` keeps the angles where the
@@ -203,5 +236,6 @@ from, and a profile may carry `cut_tool` as a shop default.
 - v1.2 (2026-09-04): engrave layer detection note.
 - v1.3 (2026-09-04): sheets list (multiple stock sizes).
 - v1.4 (2026-09-05): profile, machine, marking_tool_diameter, outputs, labels, parts[].label.
+- v1.7 (2026-10-02): factory_edge_margin and factory_edge_policy; factory-edge reference placement documented.
 - v1.6 (2026-09-10): materials block, stock material and factory_edges, part material/grain/grain_axis/reference/banded_edges, segment addressing for part edges.
 - v1.5 (2026-09-10): cut_tool with kerf presets; kerf optional when a tool supplies it; per-rod cut_tool and kerf.

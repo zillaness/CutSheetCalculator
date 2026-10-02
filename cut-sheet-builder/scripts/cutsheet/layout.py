@@ -125,6 +125,10 @@ def build_layout(job: Job) -> Layout:
     from .pack_1d import pack_rods
 
     layout = Layout(job=job, sheets=[])
+    # Reset per-run state: verification re-runs build_layout on this same job to check
+    # determinism, and an accumulator would otherwise double up.
+    job.reference_runs = []
+    job.reference_result = None
 
     # Partition parts: each isolated group alone; everything else together.
     buckets: list[tuple[Optional[str], list[Part]]] = []
@@ -176,7 +180,8 @@ def build_layout(job: Job) -> Layout:
             else:
                 engine = job.engine_2d if job.engine_2d in ("auto", "rectpack", "bundled") else "auto"
                 placements, used, fb, remaining = pack_rectangles(job, remaining, engine, stock.width, stock.height, cap,
-                                                                 job.stock_grain(stock))
+                                                                 job.stock_grain(stock), stock=stock,
+                                                                 reference_pool=bool(job.reference_parts))
                 if "true-outline" in modes and all_rects and job.cutting_method != "guillotine":
                     used += " (all parts are rectangles, so true-outline mode used the rectangle packer)"
                 layout.engines_used["bounding-box"] = used
@@ -204,6 +209,29 @@ def build_layout(job: Job) -> Layout:
             raise ValueError(
                 "ran out of sheet stock: " + ", ".join(sorted({i.part.id for i in remaining})) +
                 f" ({len(remaining)} piece(s)) could not be placed. Add quantity to a stock entry or add an unlimited last entry.")
+
+    if job.reference_runs:
+        satisfied = [e for run in job.reference_runs for e in run["satisfied"]]
+        got = {(e["part"], e["copy"]) for e in satisfied}
+        wanted = [(p.id, i) for p in job.reference_parts for i in range(1, p.quantity + 1)]
+        last = job.reference_runs[-1]
+        down = [(pid, cp) for (pid, cp) in wanted if (pid, cp) not in got]
+        # The recommendation is about the sheet that would actually be opened next, so it is
+        # computed once from the final leftovers against the stock the job ended on.
+        recommend = 0
+        if down and job.factory_edge_policy == "use-available":
+            from .reference import would_fit_on_one_more_sheet
+            by_id = {p.id: p for p in job.parts}
+            left_insts = [Instance(by_id[pid], cp) for (pid, cp) in down]
+            last_stock = next((st for st in job.stocks if st.label == last["stock"]), job.stocks[-1])
+            recommend = would_fit_on_one_more_sheet(job, last_stock, left_insts, job.gap)
+        job.reference_result = {
+            "satisfied": satisfied,
+            "downgraded": [{"part": pid, "copy": cp} for (pid, cp) in down],
+            "policy": job.factory_edge_policy,
+            "one_more_sheet_would_satisfy": recommend,
+            "stock": last["stock"],
+        }
 
     if job.rods:
         layout.rod_result = pack_rods(job.rods, job.kerf)
